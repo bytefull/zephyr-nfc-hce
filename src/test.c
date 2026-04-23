@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(test, LOG_LEVEL_INF);
 
 #define PN532_PREAMBLE (0x00)   ///< Command sequence start, byte 1/3
 #define PN532_STARTCODE1 (0x00) ///< Command sequence start, byte 2/3
@@ -21,6 +21,7 @@ uint8_t pn532_packetbuffer[PN532_PACKBUFFSIZ]; ///< Packet buffer used in variou
 #define PN532_COMMAND_GETFIRMWAREVERSION (0x02)    ///< Get firmware version
 #define PN532_COMMAND_SAMCONFIGURATION (0x14)      ///< SAM configuration
 #define PN532_COMMAND_INLISTPASSIVETARGET (0x4A)   ///< List passive target
+#define PN532_COMMAND_INDATAEXCHANGE (0x40)        ///< Data exchange
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
@@ -76,7 +77,7 @@ static void uart_cb(const struct device *dev, void *user_data)
         int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
         if (len > 0) {
             rx_len += len;
-            LOG_HEXDUMP_INF(rx_buf, rx_len, "RX");
+            LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
         }
     }
 }
@@ -87,7 +88,7 @@ static void uart_send(const uint8_t *data, size_t len)
         uart_poll_out(uart_dev, data[i]);
     }
 
-    LOG_HEXDUMP_INF(data, len, "TX");
+    LOG_HEXDUMP_DBG(data, len, "TX");
 }
 
 static bool wait_for_rx(size_t expected_len, int timeout_ms)
@@ -153,7 +154,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         return false;
     }
 
-    LOG_INF("ACK received");
+    LOG_DBG("ACK received");
 
     /* Did the response already start arriving right after ACK? */
     if (rx_len > sizeof(ack)) {
@@ -164,7 +165,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
     int64_t end = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < end) {
         if (rx_len > sizeof(ack)) {
-            LOG_INF("Response received");
+            LOG_DBG("Response received");
             return true;
         }
         k_sleep(K_USEC(100));
@@ -207,9 +208,9 @@ int main(void)
     /* Wait for a little bit until we receive the 15 bytes of the response */
     int64_t end = k_uptime_get() + 100;
     while (k_uptime_get() < end) {
-        LOG_WRN("rx_len=%d, waiting for SAMConfig response...", rx_len);
+        LOG_DBG("rx_len=%d, waiting for SAMConfig response...", rx_len);
         if (rx_len >= 15) {
-            LOG_INF("Response received");
+            LOG_DBG("Response received");
             break;
         }
         k_sleep(K_USEC(100));
@@ -232,23 +233,19 @@ int main(void)
     /* Wait for a little bit until we receive the 19 bytes of the response */
     end = k_uptime_get() + 100;
     while (k_uptime_get() < end) {
-        LOG_WRN("rx_len=%d, waiting for GetFirmwareVersion response...", rx_len);
+        LOG_DBG("rx_len=%d, waiting for GetFirmwareVersion response...", rx_len);
         if (rx_len >= 19) {
-            LOG_INF("Response received");
+            LOG_DBG("Response received");
             break;
         }
         k_sleep(K_USEC(100));
     }
     /* Parse firmware response manually */
-    int resp_offset = sizeof(ack);
-    if (rx_len < resp_offset + 10) {
-        LOG_ERR("Response too short");
-        return 0;
-    }
     if (rx_buf[12] != 0x03) {
         LOG_ERR("Unexpected response code: 0x%02X", rx_buf[12]);
         return 0;
     }
+    LOG_INF("GetFirmwareVersion OK");
     const uint8_t ic  = rx_buf[13];
     const uint8_t ver = rx_buf[14];
     const uint8_t rev = rx_buf[15];
@@ -262,17 +259,18 @@ int main(void)
     pn532_packetbuffer[2] = 0x00;
     while (1) {
         if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
-            LOG_ERR("InListPassiveTarget failed");
+            LOG_DBG("Nothing detected, retrying...");
             k_msleep(100);
             continue;
         } else {
-            LOG_INF("InListPassiveTarget command successful, detected something...");
+            LOG_INF("InListPassiveTarget OK");
             break;
         }
     }
 
     /* ---- InDataExchange ---- */
-    pn532_packetbuffer[0] = 0x40; // PN532_COMMAND_INDATAEXCHANGE;
+    LOG_INF("Sending InDataExchange command");
+    pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
     pn532_packetbuffer[1] = 1; // Target number (only one target supported in this example)
     for (int i = 0; i < sizeof(selectApduCmd); ++i) {
         pn532_packetbuffer[i + 2] = selectApduCmd[i];
@@ -281,6 +279,7 @@ int main(void)
         LOG_ERR("SELECT APDU failed");
         return 0;
     }
+    LOG_INF("InDataExchange OK");
     LOG_INF("SELECT APDU successful...");
 
     while (1)
