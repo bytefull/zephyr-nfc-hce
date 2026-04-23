@@ -44,6 +44,19 @@ static const uint8_t wakeup_cmd[] = {
     0x00  /* (Not a valid frame, just padding / noise) */
 };
 
+  /*
+  * STEP 2: Send SELECT APDU (AID selection)
+  * AID = F123456789ABCDE1 (8 bytes)
+  */
+static const  uint8_t selectApduCmd[] = {
+    0x00,  // CLA
+    0xA4,  // INS (SELECT)
+    0x04,  // P1 (select by AID)
+    0x00,  // P2
+    0x08,  // Lc: length = 8 bytes
+    0xF1, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xE1, // AID (F123456789ABCDE1)
+    0x00  // Le
+};
 // static const uint8_t SAMConfig_cmd[] = {
 //     0x00, /* Preamble */
 //     0xFF, /* Start code 1 */
@@ -257,13 +270,31 @@ int main(void)
     pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
     pn532_packetbuffer[1] = 0x01;
     pn532_packetbuffer[2] = 0x00;
-
     while (1) {
         if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
             LOG_ERR("InListPassiveTarget failed");
+            k_msleep(100);
             continue;
+        } else {
+            LOG_INF("InListPassiveTarget command successful, detected something...");
+            break;
         }
-        LOG_INF("InListPassiveTarget command successful, detected something...");
+    }
+
+    /* ---- InDataExchange ---- */
+    pn532_packetbuffer[0] = 0x40; // PN532_COMMAND_INDATAEXCHANGE;
+    pn532_packetbuffer[1] = 1; // Target number (only one target supported in this example)
+    for (int i = 0; i < sizeof(selectApduCmd); ++i) {
+        pn532_packetbuffer[i + 2] = selectApduCmd[i];
+    }
+    if (!pn532_send_command(pn532_packetbuffer, sizeof(selectApduCmd) + 2, 1000)) {
+        LOG_ERR("SELECT APDU failed");
+        return 0;
+    }
+    LOG_INF("SELECT APDU successful...");
+
+    while (1)
+    {
         k_msleep(100);
     }
 
