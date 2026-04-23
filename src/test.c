@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(test, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
 
 #define PN532_PREAMBLE (0x00)   ///< Command sequence start, byte 1/3
 #define PN532_STARTCODE1 (0x00) ///< Command sequence start, byte 2/3
@@ -45,7 +45,7 @@ static const uint8_t wakeup_cmd[] = {
 };
 
   /*
-  * STEP 2: Send SELECT APDU (AID selection)
+  * SELECT APDU (AID selection)
   * AID = F123456789ABCDE1 (8 bytes)
   */
 static const  uint8_t selectApduCmd[] = {
@@ -57,30 +57,6 @@ static const  uint8_t selectApduCmd[] = {
     0xF1, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xE1, // AID (F123456789ABCDE1)
     0x00  // Le
 };
-// static const uint8_t SAMConfig_cmd[] = {
-//     0x00, /* Preamble */
-//     0xFF, /* Start code 1 */
-//     0x05, /* LEN = 5 bytes of payload (TFI + DATA) */
-//     0xFB, /* LCS = 0x100 - 0x05 = 0xFB */
-//     0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
-//     0x14, /* Command: SAMConfiguration */
-//     0x01, /* Mode: 0x01 = Normal mode */
-//     0x14, /* Timeout: 0x14 = 20 (in units of 50 ms → 1 second) */
-//     0x01, /* IRQ usage: 0x01 = Use IRQ pin (optional depending on setup) */
-//     0x02, /* DCS (Data Checksum): Checksum of TFI + DATA: */
-//     0x00  /* Postamble */
-// };
-
-// static uint8_t GetFirmwareVersion_cmd[] = {
-//     0x00, /* Preamble */
-//     0xFF, /* Start code 1 */
-//     0x02, /* LEN = 2 bytes of payload (TFI + DATA) */
-//     0xFE, /* LCS = 0x100 - 0x02 = 0xFE */
-//     0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
-//     0x02, /* Command: GetFirmwareVersion */
-//     0x2A, /* DCS (Data Checksum): Checksum of TFI + DATA */
-//     0x00  /* Postamble */
-// };
 
 /* UART interrupt callback */
 static void uart_cb(const struct device *dev, void *user_data)
@@ -184,7 +160,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         return true;
     }
 
-    /* Otherwise wait for more 300 ms */
+    /* Otherwise wait for a little bit more */
     int64_t end = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < end) {
         if (rx_len > sizeof(ack)) {
@@ -228,15 +204,19 @@ int main(void)
         return 0;
     }
     /* Check SAMConfig response manually */
-    size_t resp_offset = sizeof(ack);
-
-    if (rx_len < resp_offset + 7) {
-        LOG_ERR("SAMConfig response too short");
-        return 0;
+    /* Wait for a little bit until we receive the 15 bytes of the response */
+    int64_t end = k_uptime_get() + 100;
+    while (k_uptime_get() < end) {
+        LOG_WRN("rx_len=%d, waiting for SAMConfig response...", rx_len);
+        if (rx_len >= 15) {
+            LOG_INF("Response received");
+            break;
+        }
+        k_sleep(K_USEC(100));
     }
 
-    if (rx_buf[resp_offset + 6] != 0x15) {
-        LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[resp_offset + 6]);
+    if (rx_buf[12] != 0x15) {
+        LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[12]);
         return 0;
     }
 
@@ -249,19 +229,29 @@ int main(void)
         LOG_ERR("GetFirmwareVersion failed");
         return 0;
     }
+    /* Wait for a little bit until we receive the 19 bytes of the response */
+    end = k_uptime_get() + 100;
+    while (k_uptime_get() < end) {
+        LOG_WRN("rx_len=%d, waiting for GetFirmwareVersion response...", rx_len);
+        if (rx_len >= 19) {
+            LOG_INF("Response received");
+            break;
+        }
+        k_sleep(K_USEC(100));
+    }
     /* Parse firmware response manually */
-    resp_offset = sizeof(ack);
+    int resp_offset = sizeof(ack);
     if (rx_len < resp_offset + 10) {
         LOG_ERR("Response too short");
         return 0;
     }
-    if (rx_buf[resp_offset + 6] != 0x03) {
-        LOG_ERR("Unexpected response code: 0x%02X", rx_buf[resp_offset + 6]);
+    if (rx_buf[12] != 0x03) {
+        LOG_ERR("Unexpected response code: 0x%02X", rx_buf[12]);
         return 0;
     }
-    const uint8_t ic  = rx_buf[resp_offset + 7];
-    const uint8_t ver = rx_buf[resp_offset + 8];
-    const uint8_t rev = rx_buf[resp_offset + 9];
+    const uint8_t ic  = rx_buf[13];
+    const uint8_t ver = rx_buf[14];
+    const uint8_t rev = rx_buf[15];
     LOG_INF("Found PN5%02X", ic);
     LOG_INF("Firmware version: %d.%d", ver, rev);
 
