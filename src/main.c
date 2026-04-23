@@ -65,6 +65,7 @@ void pn532_send_ack(void)
     pn532_uart_send(ack, sizeof(ack));
 }
 
+#ifdef CONFIG_PN532_BAUD_921600
 /* Change host-side baud rate at runtime */
 static int set_host_baudrate(uint32_t baud)
 {
@@ -81,6 +82,7 @@ static int set_host_baudrate(uint32_t baud)
     }
     return ret;
 }
+#endif /* CONFIG_PN532_BAUD_921600 */
 
 static bool send_command_get_ack(const uint8_t *cmd, size_t cmd_len, int timeout_ms)
 {
@@ -136,6 +138,8 @@ int main(void)
     }
     LOG_INF("SAMConfig response OK");
 
+#ifdef CONFIG_PN532_BAUD_921600
+    LOG_INF("Configuring PN532 to 921600 baud...");
     /* ---- SetSerialBaudRate to 921600 (BR=0x07) ----
      *
      * Frame: 00 FF 03 FD D4 10 07 15 00
@@ -180,6 +184,7 @@ int main(void)
     /* Flush any garbage from the baud-rate transition */
     k_msleep(2);
     pn532_uart_flush();
+#endif /* CONFIG_PN532_BAUD_921600 */
 
     /* ---- getFirmwareVersion ---- */
     uint8_t fw_cmd[] = {
