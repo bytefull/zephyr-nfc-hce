@@ -4,6 +4,24 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(test, LOG_LEVEL_INF);
 
+#define PN532_PREAMBLE (0x00)   ///< Command sequence start, byte 1/3
+#define PN532_STARTCODE1 (0x00) ///< Command sequence start, byte 2/3
+#define PN532_STARTCODE2 (0xFF) ///< Command sequence start, byte 3/3
+#define PN532_POSTAMBLE (0x00)  ///< EOD
+
+#define PN532_HOSTTOPN532 (0xD4) ///< Host-to-PN532
+#define PN532_PN532TOHOST (0xD5) ///< PN532-to-host
+
+#define PN532_PACKBUFFSIZ 64                ///< Packet buffer size in bytes
+uint8_t pn532_packetbuffer[PN532_PACKBUFFSIZ]; ///< Packet buffer used in various
+                                            ///< transactions
+
+
+// PN532 Commands
+#define PN532_COMMAND_GETFIRMWAREVERSION (0x02)    ///< Get firmware version
+#define PN532_COMMAND_SAMCONFIGURATION (0x14)      ///< SAM configuration
+#define PN532_COMMAND_INLISTPASSIVETARGET (0x4A)   ///< List passive target
+
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
 static uint8_t rx_buf[256] = {0};
@@ -26,30 +44,30 @@ static const uint8_t wakeup_cmd[] = {
     0x00  /* (Not a valid frame, just padding / noise) */
 };
 
-static const uint8_t SAMConfig_cmd[] = {
-    0x00, /* Preamble */
-    0xFF, /* Start code 1 */
-    0x05, /* LEN = 5 bytes of payload (TFI + DATA) */
-    0xFB, /* LCS = 0x100 - 0x05 = 0xFB */
-    0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
-    0x14, /* Command: SAMConfiguration */
-    0x01, /* Mode: 0x01 = Normal mode */
-    0x14, /* Timeout: 0x14 = 20 (in units of 50 ms → 1 second) */
-    0x01, /* IRQ usage: 0x01 = Use IRQ pin (optional depending on setup) */
-    0x02, /* DCS (Data Checksum): Checksum of TFI + DATA: */
-    0x00  /* Postamble */
-};
+// static const uint8_t SAMConfig_cmd[] = {
+//     0x00, /* Preamble */
+//     0xFF, /* Start code 1 */
+//     0x05, /* LEN = 5 bytes of payload (TFI + DATA) */
+//     0xFB, /* LCS = 0x100 - 0x05 = 0xFB */
+//     0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
+//     0x14, /* Command: SAMConfiguration */
+//     0x01, /* Mode: 0x01 = Normal mode */
+//     0x14, /* Timeout: 0x14 = 20 (in units of 50 ms → 1 second) */
+//     0x01, /* IRQ usage: 0x01 = Use IRQ pin (optional depending on setup) */
+//     0x02, /* DCS (Data Checksum): Checksum of TFI + DATA: */
+//     0x00  /* Postamble */
+// };
 
-static uint8_t GetFirmwareVersion_cmd[] = {
-    0x00, /* Preamble */
-    0xFF, /* Start code 1 */
-    0x02, /* LEN = 2 bytes of payload (TFI + DATA) */
-    0xFE, /* LCS = 0x100 - 0x02 = 0xFE */
-    0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
-    0x02, /* Command: GetFirmwareVersion */
-    0x2A, /* DCS (Data Checksum): Checksum of TFI + DATA */
-    0x00  /* Postamble */
-};
+// static uint8_t GetFirmwareVersion_cmd[] = {
+//     0x00, /* Preamble */
+//     0xFF, /* Start code 1 */
+//     0x02, /* LEN = 2 bytes of payload (TFI + DATA) */
+//     0xFE, /* LCS = 0x100 - 0x02 = 0xFE */
+//     0xD4, /* TFI (Frame Identifier): D4 = Host → PN532 */
+//     0x02, /* Command: GetFirmwareVersion */
+//     0x2A, /* DCS (Data Checksum): Checksum of TFI + DATA */
+//     0x00  /* Postamble */
+// };
 
 /* UART interrupt callback */
 static void uart_cb(const struct device *dev, void *user_data)
@@ -97,16 +115,46 @@ static bool wait_for_rx(size_t expected_len, int timeout_ms)
     return false;
 }
 
-static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len)
+/**************************************************************************/
+/*!
+    @brief  Writes a command to the PN532, automatically inserting the
+            preamble and required frame details (checksum, len, etc.)
+
+    @param  cmd       Pointer to the command buffer
+    @param  cmdlen    Command length in bytes
+*/
+/**************************************************************************/
+void writecommand(uint8_t *cmd, uint8_t cmdlen) {
+    uint8_t packet[8 + cmdlen];
+    uint8_t LEN = cmdlen + 1;
+
+    packet[0] = PN532_PREAMBLE;
+    packet[1] = PN532_STARTCODE1;
+    packet[2] = PN532_STARTCODE2;
+    packet[3] = LEN;
+    packet[4] = ~LEN + 1;
+    packet[5] = PN532_HOSTTOPN532;
+    uint8_t sum = 0;
+    for (uint8_t i = 0; i < cmdlen; i++) {
+      packet[6 + i] = cmd[i];
+      sum += cmd[i];
+    }
+    packet[6 + cmdlen] = ~(PN532_HOSTTOPN532 + sum) + 1;
+    packet[7 + cmdlen] = PN532_POSTAMBLE;
+
+    uart_send(packet, 8 + cmdlen);
+}
+
+static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_ms)
 {
     /* Reset RX buffer */
     rx_len = 0;
 
     /* Send command */
-    uart_send(cmd, cmd_len);
+    writecommand((uint8_t *)cmd, cmd_len);
 
     /* Wait for ACK (we’re willing to wait 200 ms for ack) */
-    if (!wait_for_rx(sizeof(ack), 200)) {
+    if (!wait_for_rx(sizeof(ack), timeout_ms)) {
         LOG_ERR("Timeout waiting for ACK");
         return false;
     }
@@ -124,7 +172,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len)
     }
 
     /* Otherwise wait for more 300 ms */
-    int64_t end = k_uptime_get() + 300;
+    int64_t end = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < end) {
         if (rx_len > sizeof(ack)) {
             LOG_INF("Response received");
@@ -158,7 +206,11 @@ int main(void)
 
     /* ---- SAMConfig ---- */
     LOG_INF("Sending SAMConfig command");
-    if (!pn532_send_command(SAMConfig_cmd, sizeof(SAMConfig_cmd))) {
+    pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
+    pn532_packetbuffer[1] = 0x01; // normal mode;
+    pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
+    pn532_packetbuffer[3] = 0x01; // use IRQ pin!
+    if (!pn532_send_command(pn532_packetbuffer, 4, 100)) {
         LOG_ERR("SAMConfig failed");
         return 0;
     }
@@ -179,7 +231,8 @@ int main(void)
 
     /* ---- GetFirmwareVersion ---- */
     LOG_INF("Sending GetFirmwareVersion");
-    if (!pn532_send_command(GetFirmwareVersion_cmd, sizeof(GetFirmwareVersion_cmd))) {
+    pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
+    if (!pn532_send_command(pn532_packetbuffer, 1, 100)) {
         LOG_ERR("GetFirmwareVersion failed");
         return 0;
     }
@@ -199,8 +252,19 @@ int main(void)
     LOG_INF("Found PN5%02X", ic);
     LOG_INF("Firmware version: %d.%d", ver, rev);
 
+    /* ---- InListPassiveTarget ---- */
+    LOG_INF("Sending InListPassiveTarget command");
+    pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
+    pn532_packetbuffer[1] = 0x01;
+    pn532_packetbuffer[2] = 0x00;
+
     while (1) {
-        k_sleep(K_SECONDS(1));
+        if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
+            LOG_ERR("InListPassiveTarget failed");
+            continue;
+        }
+        LOG_INF("InListPassiveTarget command successful, detected something...");
+        k_msleep(100);
     }
 
     return 0;
