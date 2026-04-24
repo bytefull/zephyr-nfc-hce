@@ -171,7 +171,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         k_sleep(K_USEC(100));
     }
 
-    LOG_ERR("Timeout waiting for response");
+    LOG_ERR("Timeout waiting for response after the ack");
     return false;
 }
 
@@ -204,23 +204,15 @@ int main(void)
         LOG_ERR("SAMConfig failed");
         return 0;
     }
-    /* Check SAMConfig response manually */
-    /* Wait for a little bit until we receive the 15 bytes of the response */
-    int64_t end = k_uptime_get() + 100;
-    while (k_uptime_get() < end) {
-        LOG_DBG("rx_len=%d, waiting for SAMConfig response...", rx_len);
-        if (rx_len >= 15) {
-            LOG_DBG("Response received");
-            break;
-        }
-        k_sleep(K_USEC(100));
+    /* Wait for a little bit until we receive the 15 bytes of the SAMConfig response */
+    if (!wait_for_rx(15, 100)) {
+        LOG_ERR("Timeout waiting for SAMConfig response");
+        return 0;
     }
-
     if (rx_buf[12] != 0x15) {
         LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[12]);
         return 0;
     }
-
     LOG_INF("SAMConfig OK");
 
     /* ---- GetFirmwareVersion ---- */
@@ -230,17 +222,11 @@ int main(void)
         LOG_ERR("GetFirmwareVersion failed");
         return 0;
     }
-    /* Wait for a little bit until we receive the 19 bytes of the response */
-    end = k_uptime_get() + 100;
-    while (k_uptime_get() < end) {
-        LOG_DBG("rx_len=%d, waiting for GetFirmwareVersion response...", rx_len);
-        if (rx_len >= 19) {
-            LOG_DBG("Response received");
-            break;
-        }
-        k_sleep(K_USEC(100));
+    /* Wait for a little bit until we receive the 19 bytes of the GetFirmwareVersion response */
+    if (!wait_for_rx(19, 100)) {
+        LOG_ERR("Timeout waiting for GetFirmwareVersion response");
+        return 0;
     }
-    /* Parse firmware response manually */
     if (rx_buf[12] != 0x03) {
         LOG_ERR("Unexpected response code: 0x%02X", rx_buf[12]);
         return 0;
