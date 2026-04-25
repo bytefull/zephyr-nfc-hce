@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(test, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
 
 #define PN532_PREAMBLE (0x00)   ///< Command sequence start, byte 1/3
 #define PN532_STARTCODE1 (0x00) ///< Command sequence start, byte 2/3
@@ -22,11 +22,26 @@ uint8_t pn532_packetbuffer[PN532_PACKBUFFSIZ]; ///< Packet buffer used in variou
 #define PN532_COMMAND_SAMCONFIGURATION (0x14)      ///< SAM configuration
 #define PN532_COMMAND_INLISTPASSIVETARGET (0x4A)   ///< List passive target
 #define PN532_COMMAND_INDATAEXCHANGE (0x40)        ///< Data exchange
+#define PN532_RESPONSE_INLISTPASSIVETARGET (0x4B) ///< List passive target
+#define PN532_RESPONSE_INDATAEXCHANGE (0x41)      ///< Data exchange
+
+struct pn532_fw_version
+{
+    uint8_t ic;  ///< PN5xx IC type (e.g. 0x32 for PN532)
+    uint8_t ver; ///< Firmware version
+    uint8_t rev; ///< Firmware revision
+};
+
+static const 
+uint8_t pn532response_firmwarevers[] = {
+    0x00, 0x00, 0xFF,
+    0x06, 0xFA, 0xD5}; ///< Expected firmware version message from PN532
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
 static uint8_t rx_buf[256] = {0};
 static volatile size_t rx_len = 0;
+static int8_t _inListedTag; // Tg number of inlisted tag.
 
 static const uint8_t ack[] = {
     0x00, /* Preamble */
@@ -68,17 +83,20 @@ static void uart_cb(const struct device *dev, void *user_data)
         return;
     }
 
-    if (uart_irq_rx_ready(dev)) {
-        if (rx_len >= sizeof(rx_buf)) {
-            LOG_ERR("RX buffer overflow");
-            rx_len = 0;
-            return;
-        }
-        int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
-        if (len > 0) {
-            rx_len += len;
-            LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
-        }
+    if (!uart_irq_rx_ready(dev)) {
+        return;
+    }
+
+    if (rx_len >= sizeof(rx_buf)) {
+        LOG_ERR("RX buffer overflow");
+        rx_len = 0;
+        return;
+    }
+
+    int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
+    if (len > 0) {
+        rx_len += len;
+        LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
     }
 }
 
@@ -143,17 +161,17 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
     /* Send command */
     writecommand((uint8_t *)cmd, cmd_len);
 
-    /* Wait for ACK (we’re willing to wait 200 ms for ack) */
+    /* Wait for ACK */
     if (!wait_for_rx(sizeof(ack), timeout_ms)) {
         LOG_ERR("Timeout waiting for ACK");
         return false;
     }
 
+    /* Check if the received data matches the expected ACK */
     if (memcmp(rx_buf, ack, sizeof(ack)) != 0) {
         LOG_ERR("Invalid ACK");
         return false;
     }
-
     LOG_DBG("ACK received");
 
     /* Did the response already start arriving right after ACK? */
@@ -161,7 +179,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         return true;
     }
 
-    /* Otherwise wait for a little bit more */
+    /* Otherwise wait for a little bit more for the response to arrive after ACK */
     int64_t end = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < end) {
         if (rx_len > sizeof(ack)) {
@@ -173,6 +191,194 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
 
     LOG_ERR("Timeout waiting for response after the ack");
     return false;
+}
+
+/**************************************************************************/
+/*!
+    @brief  Wakeup from LowVbat mode into Normal Mode.
+*/
+/**************************************************************************/
+void wakeup(void) {
+    LOG_INF("Sending wakeup command");
+    uart_send(wakeup_cmd, sizeof(wakeup_cmd));
+#if !defined(CONFIG_BOARD_NATIVE_SIM)
+    k_msleep(2);
+#endif
+}
+
+/**************************************************************************/
+/*!
+    @brief   Configures the SAM (Secure Access Module)
+    @return  true on success, false otherwise.
+*/
+/**************************************************************************/
+bool SAMConfig(void) {
+    LOG_INF("Sending SAMConfig command");
+    pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
+    pn532_packetbuffer[1] = 0x01; // normal mode;
+    pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
+    pn532_packetbuffer[3] = 0x01; // use IRQ pin!
+    if (!pn532_send_command(pn532_packetbuffer, 4, 100)) {
+        LOG_ERR("SAMConfig failed");
+        return false;
+    }
+    /* Wait for a little bit until we receive the 15 bytes of the SAMConfig response */
+    if (!wait_for_rx(15, 100)) {
+        LOG_ERR("Timeout waiting for SAMConfig response");
+        return false;
+    }
+    int offset = sizeof(ack);
+    if (rx_buf[offset] != 0 || rx_buf[offset + 1] != 0 || rx_buf[offset + 2] != 0xff) {
+        LOG_ERR("Preamble missing");
+        return false;
+    }
+    /* I don't know what is byte 4 and 5 used for */
+    if (rx_buf[offset + 6] != 0x15) {
+        LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[offset + 6]);
+        return false;
+    }
+    LOG_INF("SAMConfig OK");
+    return true;
+}
+
+/**************************************************************************/
+/*!
+    @brief  Checks the firmware version of the PN5xx chip
+
+    @returns  The chip's firmware version and ID
+*/
+/**************************************************************************/
+bool getFirmwareVersion(struct pn532_fw_version *fw_version) {
+    LOG_INF("Sending GetFirmwareVersion command");
+    pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
+    if (!pn532_send_command(pn532_packetbuffer, 1, 100)) {
+        LOG_ERR("GetFirmwareVersion failed");
+        return false;
+    }
+    /* Wait for a little bit until we receive the 19 bytes of the GetFirmwareVersion response */
+    if (!wait_for_rx(19, 100)) {
+        LOG_ERR("Timeout waiting for GetFirmwareVersion response");
+        return false;
+    }
+    if (rx_buf[sizeof(ack) + 5] != PN532_PN532TOHOST || rx_buf[sizeof(ack) + 6] != 0x03) {
+        LOG_ERR("Unexpected response to GetFirmwareVersion");
+        return false;
+    }
+
+    if (memcmp(rx_buf + sizeof(ack),
+               pn532response_firmwarevers,
+               sizeof(pn532response_firmwarevers)) != 0) {
+        LOG_ERR("Unexpected firmware version");
+        return false;
+    }
+
+    fw_version->ic = rx_buf[sizeof(ack) + 7];
+    fw_version->ver = rx_buf[sizeof(ack) + 8];
+    fw_version->rev = rx_buf[sizeof(ack) + 9];
+    LOG_INF("GetFirmwareVersion OK");
+    return true;
+}
+
+/**************************************************************************/
+/*!
+    @brief   'InLists' a passive target. PN532 acting as reader/initiator,
+             peer acting as card/responder.
+    @return  true on success, false otherwise.
+*/
+/**************************************************************************/
+bool inListPassiveTarget() {
+    LOG_INF("Sending InListPassiveTarget command");
+    pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
+    pn532_packetbuffer[1] = 0x01;
+    pn532_packetbuffer[2] = 0x00;
+    if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
+        LOG_DBG("Nothing detected, retrying...");
+        return false;
+    }
+    LOG_INF("Detected something! Processing response...");
+    uint8_t offset = sizeof(ack);
+    if ((rx_buf[offset] == 0) && (rx_buf[offset + 1] == 0) && (rx_buf[offset + 2] == 0xff)) {
+        uint8_t length = rx_buf[offset + 3];
+        if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+            LOG_ERR("Length check invalid");
+            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+            return false;
+        }
+        if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
+            rx_buf[offset + 6] == PN532_RESPONSE_INLISTPASSIVETARGET) {
+            if (rx_buf[offset + 7] != 1) {
+                LOG_ERR("Unhandled number of targets inlisted");
+                LOG_DBG("Number of tags inlisted: 0x%02X", rx_buf[offset + 7]);
+                return false;
+            }
+            _inListedTag = rx_buf[offset + 8];
+            LOG_DBG("Tag number: %d", _inListedTag);
+            LOG_INF("InListPassiveTarget OK");
+            return true;
+        }
+        LOG_ERR("Unexpected response to inlist passive host");
+        return false;
+    } else {
+        LOG_ERR("Preamble missing");
+        return false;
+    }
+}
+
+/**************************************************************************/
+/*!
+    @brief   Exchanges an APDU with the currently inlisted peer
+
+    @param   send            Pointer to data to send
+    @param   sendLength      Length of the data to send
+    @param   response        Pointer to response data
+    @param   responseLength  Pointer to the response data length
+    @return  true on success, false otherwise.
+*/
+/**************************************************************************/
+bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_t *responseLength) {
+    LOG_INF("Sending InDataExchange command");
+    pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
+    pn532_packetbuffer[1] = 1; // Target number (only one target supported in this example)
+    for (int i = 0; i < sizeof(selectApduCmd); ++i) {
+        pn532_packetbuffer[i + 2] = selectApduCmd[i];
+    }
+    if (!pn532_send_command(pn532_packetbuffer, sizeof(selectApduCmd) + 2, 1000)) {
+        LOG_ERR("inDataExchange command failed");
+        return false;
+    }
+    int offset = sizeof(ack);
+    if (rx_buf[offset] == 0 && rx_buf[offset + 1] == 0 && rx_buf[offset + 2] == 0xff) {
+        uint8_t length = rx_buf[offset + 3];
+        if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+            LOG_ERR("Length check invalid");
+            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+            return false;
+        }
+        if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
+            rx_buf[offset + 6] == PN532_RESPONSE_INDATAEXCHANGE) {
+            if ((rx_buf[offset + 7] & 0x3f) != 0) {
+                LOG_ERR("Status code indicates an error");
+                return false;
+            }
+
+            length -= 3;
+            if (length > *responseLength) {
+                length = *responseLength; // silent truncation...
+            }
+
+            for (int i = 0; i < length; ++i) {
+                response[i] = rx_buf[offset + 8 + i];
+            }
+            *responseLength = length;
+            return true;
+        } else {
+            LOG_ERR("Don't know how to handle this command");
+            return false;
+        }
+    } else {
+        LOG_ERR("Preamble missing");
+        return false;
+    }
 }
 
 int main(void)
@@ -188,84 +394,44 @@ int main(void)
     uart_irq_rx_enable(uart_dev);
 
     /* ---- Wakeup ---- */
-    LOG_INF("Sending wakeup command");
-    uart_send(wakeup_cmd, sizeof(wakeup_cmd));
-#if !defined(CONFIG_BOARD_NATIVE_SIM)
-    k_msleep(2);
-#endif
+    wakeup();
 
     /* ---- SAMConfig ---- */
-    LOG_INF("Sending SAMConfig command");
-    pn532_packetbuffer[0] = PN532_COMMAND_SAMCONFIGURATION;
-    pn532_packetbuffer[1] = 0x01; // normal mode;
-    pn532_packetbuffer[2] = 0x14; // timeout 50ms * 20 = 1 second
-    pn532_packetbuffer[3] = 0x01; // use IRQ pin!
-    if (!pn532_send_command(pn532_packetbuffer, 4, 100)) {
+    if (!SAMConfig()) {
         LOG_ERR("SAMConfig failed");
         return 0;
     }
-    /* Wait for a little bit until we receive the 15 bytes of the SAMConfig response */
-    if (!wait_for_rx(15, 100)) {
-        LOG_ERR("Timeout waiting for SAMConfig response");
-        return 0;
-    }
-    if (rx_buf[12] != 0x15) {
-        LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[12]);
-        return 0;
-    }
-    LOG_INF("SAMConfig OK");
 
     /* ---- GetFirmwareVersion ---- */
-    LOG_INF("Sending GetFirmwareVersion");
-    pn532_packetbuffer[0] = PN532_COMMAND_GETFIRMWAREVERSION;
-    if (!pn532_send_command(pn532_packetbuffer, 1, 100)) {
+    struct pn532_fw_version fw_version = {0};
+    if (!getFirmwareVersion(&fw_version)) {
         LOG_ERR("GetFirmwareVersion failed");
         return 0;
     }
-    /* Wait for a little bit until we receive the 19 bytes of the GetFirmwareVersion response */
-    if (!wait_for_rx(19, 100)) {
-        LOG_ERR("Timeout waiting for GetFirmwareVersion response");
-        return 0;
-    }
-    if (rx_buf[12] != 0x03) {
-        LOG_ERR("Unexpected response code: 0x%02X", rx_buf[12]);
-        return 0;
-    }
-    LOG_INF("GetFirmwareVersion OK");
-    const uint8_t ic  = rx_buf[13];
-    const uint8_t ver = rx_buf[14];
-    const uint8_t rev = rx_buf[15];
-    LOG_INF("Found PN5%02X", ic);
-    LOG_INF("Firmware version: %d.%d", ver, rev);
+    LOG_INF("Found PN5%02X", fw_version.ic);
+    LOG_INF("Firmware version: %d.%d", fw_version.ver, fw_version.rev);
 
     /* ---- InListPassiveTarget ---- */
-    LOG_INF("Sending InListPassiveTarget command");
-    pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
-    pn532_packetbuffer[1] = 0x01;
-    pn532_packetbuffer[2] = 0x00;
-    while (1) {
-        if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
-            LOG_DBG("Nothing detected, retrying...");
-            k_msleep(100);
-            continue;
-        } else {
-            LOG_INF("InListPassiveTarget OK");
+    while (1)
+    {
+        if (inListPassiveTarget()) {
             break;
         }
+        LOG_DBG("No card detected, retrying...");
+        k_msleep(500);
     }
+    LOG_INF("InListPassiveTarget successful...");
 
     /* ---- InDataExchange ---- */
-    LOG_INF("Sending InDataExchange command");
-    pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
-    pn532_packetbuffer[1] = 1; // Target number (only one target supported in this example)
-    for (int i = 0; i < sizeof(selectApduCmd); ++i) {
-        pn532_packetbuffer[i + 2] = selectApduCmd[i];
-    }
-    if (!pn532_send_command(pn532_packetbuffer, sizeof(selectApduCmd) + 2, 1000)) {
-        LOG_ERR("SELECT APDU failed");
+    uint8_t response[128] = {0};
+    uint8_t responseLength = sizeof(response);
+    if (!inDataExchange((uint8_t *)selectApduCmd, sizeof(selectApduCmd), response, &responseLength)) {
+        LOG_ERR("inDataExchange failed");
         return 0;
     }
     LOG_INF("InDataExchange OK");
+    LOG_DBG("Received response (%d bytes):", responseLength);
+    LOG_HEXDUMP_DBG(response, responseLength, "Response");
     LOG_INF("SELECT APDU successful...");
 
     while (1)
