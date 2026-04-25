@@ -18,6 +18,8 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 
 - [x] Organize the code in separate pn532.c and pn532.h files with clean APIs
 
+- [ ] Fix high baudrate problem on STM32 (although works fine on native_sim)
+
 - [ ] Encapsulate the waiting for response after each command into a function (eg: pn532_read_response)
 
 - [ ] Start to work on structuring those files as a zephyr out of tree driver

@@ -1,7 +1,6 @@
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
+LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 #include "pn532.h"
 
@@ -36,7 +35,7 @@ int main(void)
     }
 
     /* ---- SetSerialBaudRate ---- */
-    if (!pn532_set_serial_baudrate(921600)) {
+    if (!pn532_set_serial_baudrate(230400)) {
         LOG_ERR("SetSerialBaudRate failed");
         return 0;
     }

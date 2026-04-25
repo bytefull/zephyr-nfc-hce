@@ -25,6 +25,8 @@ LOG_MODULE_REGISTER(pn532, LOG_LEVEL_DBG);
 /* PN532 Responses */
 #define PN532_RESPONSE_INLISTPASSIVETARGET (0x4B) /* List passive target */
 #define PN532_RESPONSE_INDATAEXCHANGE      (0x41) /* Data exchange */
+#define PN532_RESPONSE_SETSERIALBAUDRATE   (0x11) /* Set serial baud rate */
+#define PN532_RESPONSE_GETFIRMWAREVERSION  (0x03) /* Get firmware version */
 
 /**
  * @brief Baud rate values for the PN532.
@@ -188,7 +190,7 @@ static bool pn532_write_command(uint8_t *cmd, uint8_t cmd_len) {
 
     /*
      * Copy command payload into frame and compute checksum
-     * Checksum is computed over DATA only (excluding TFI)
+     * Checksum is computed over TFI + DATA
      */
     uint8_t sum = 0;
     for (uint8_t i = 0; i < cmd_len; i++) {
@@ -355,7 +357,7 @@ bool pn532_set_serial_baudrate(uint32_t baudrate) {
         baudrate_code = PN532_BAUDRATE_921600;
         break;
     default:
-        LOG_ERR("Unsupported baud rate: %lu", baudrate);
+        LOG_ERR("Unsupported baud rate: %d", baudrate);
         return false;
     }
 
@@ -382,6 +384,12 @@ bool pn532_set_serial_baudrate(uint32_t baudrate) {
         return false;
     }
 
+    if ((response_buf[5] != PN532_PN532TOHOST ) ||
+        (response_buf[6] != PN532_RESPONSE_SETSERIALBAUDRATE)) {
+        LOG_ERR("Invalid SetSerialBaudRate response: 0x%02X", response_buf[5]);
+        return false;
+    }
+
     /* Per datasheet: PN532 switches AFTER receiving our ACK.
      * Send ACK at 115200, then switch host side. */
     pn532_uart_send(PN532_ACK, sizeof(PN532_ACK));
@@ -399,10 +407,10 @@ bool pn532_set_serial_baudrate(uint32_t baudrate) {
     cfg.baudrate = baudrate;
     ret = uart_configure(uart_dev, &cfg);
     if (ret) {
-        LOG_ERR("uart_configure(%u) failed: %d", baudrate, ret);
+        LOG_ERR("uart_configure(%d) failed: %d", baudrate, ret);
         return false;
     }
-    LOG_INF("Host UART switched to %lu", baudrate);
+    LOG_INF("Host UART switched to %d", baudrate);
 
     /* Flush any garbage from the baud-rate transition */
     k_msleep(2);
@@ -434,7 +442,8 @@ bool pn532_get_firmware_version(struct pn532_fw_version *fw_version) {
         return false;
     }
     /* Verify response buffer */
-    if ((response_buf[5] != PN532_PN532TOHOST) || (response_buf[6] != 0x03)) {
+    if ((response_buf[5] != PN532_PN532TOHOST) ||
+        (response_buf[6] != PN532_RESPONSE_GETFIRMWAREVERSION)) {
         LOG_ERR("Unexpected response to GetFirmwareVersion");
         return false;
     }
