@@ -14,12 +14,12 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 
 - [x] Normalize comments + doxygen
 
-- [ ] Encapsulate the waiting for response after each command into a function (eg: pn532_read_response)
+- [x] Increase UART baudrate to 921600 in initialization, right after SAMConfig
 
-- [ ] Organize the code in separate pn532.c and pn532.h files with clean APIs
+- [x] Organize the code in separate pn532.c and pn532.h files with clean APIs
+
+- [ ] Encapsulate the waiting for response after each command into a function (eg: pn532_read_response)
 
 - [ ] Start to work on structuring those files as a zephyr out of tree driver
 
 - [ ] Start work on the application and the challenge response protocol using the APDUs
-
-- [ ] Increase UART baudrate to 921600 in initialization, right after SAMConfig
