@@ -1,218 +1,90 @@
 #include <zephyr/kernel.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
-static const struct device *const uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
+#include "pn532.h"
 
-void pn532_uart_send(const uint8_t *data, size_t len)
-{
-    for (size_t i = 0; i < len; i++) {
-        uart_poll_out(uart_dev, data[i]);
-    }
-
-    LOG_HEXDUMP_INF(data, len, "TX");
-}
-
-int pn532_uart_read(uint8_t *buf, size_t max_len, int timeout_ms)
-{
-    int64_t end = k_uptime_get() + timeout_ms;
-    int64_t now = 0;
-    size_t idx = 0;
-
-    while (idx < max_len) {
-        now = k_uptime_get();
-        if (now >= end) {
-            break;
-        }
-
-        uint8_t c;
-        if (uart_poll_in(uart_dev, &c) == 0) {
-            buf[idx++] = c;
-        } else {
-            k_yield();
-        }
-    }
-
-    if (idx > 0) {
-        LOG_HEXDUMP_INF(buf, idx, "RX");
-    } else {
-        LOG_WRN("RX timeout (%d ms)", timeout_ms);
-    }
-
-    return idx;
-}
-
-void pn532_uart_flush(void)
-{
-    uint8_t c;
-    while (uart_poll_in(uart_dev, &c) == 0) {
-        /* discard */
-    }
-}
-
-bool pn532_is_ack(uint8_t *buf)
-{
-    const uint8_t ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
-    return memcmp(buf, ack, 6) == 0;
-}
-
-/* Send a bare ACK frame (host -> PN532) */
-void pn532_send_ack(void)
-{
-    const uint8_t ack[] = {0x00, 0x00, 0xFF, 0x00, 0xFF, 0x00};
-    pn532_uart_send(ack, sizeof(ack));
-}
-
-#ifdef CONFIG_PN532_BAUD_921600
-/* Change host-side baud rate at runtime */
-static int set_host_baudrate(uint32_t baud)
-{
-    struct uart_config cfg = {0};
-    int ret = uart_config_get(uart_dev, &cfg);
-    if (ret) {
-        LOG_ERR("uart_config_get failed: %d", ret);
-        return ret;
-    }
-    cfg.baudrate = baud;
-    ret = uart_configure(uart_dev, &cfg);
-    if (ret) {
-        LOG_ERR("uart_configure(%u) failed: %d", baud, ret);
-    }
-    return ret;
-}
-#endif /* CONFIG_PN532_BAUD_921600 */
-
-static bool send_command_get_ack(const uint8_t *cmd, size_t cmd_len, int timeout_ms)
-{
-    uint8_t buf[6];
-
-    pn532_uart_send(cmd, cmd_len);
-
-    int len = pn532_uart_read(buf, 6, timeout_ms);
-    if (len != 6 || !pn532_is_ack(buf)) {
-        LOG_ERR("No ACK");
-        return false;
-    }
-    return true;
-}
+/*
+ * SELECT APDU (AID selection)
+ * AID = F123456789ABCDE1 (8 bytes)
+ */
+static const uint8_t SELECT_APDU_CMD[] = {
+    0x00,  /* CLA */
+    0xA4,  /* INS (SELECT) */
+    0x04,  /* P1 (select by AID) */
+    0x00,  /* P2 */
+    0x08,  /* Lc: length = 8 bytes */
+    0xF1, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xE1, /* AID (F123456789ABCDE1) */
+    0x00   /* Le */
+};
 
 int main(void)
 {
-    uint8_t buf[64] = {0};
-    int len = 0;
+    LOG_INF("PN532 test started");
 
-    if (!device_is_ready(uart_dev)) {
-        LOG_ERR("UART not ready");
-        return -1;
-    }
-    LOG_INF("UART ready (115200 baud)");
+    /* Initialize the PN532 */
+    pn532_init();
 
     /* ---- Wakeup ---- */
-    uint8_t wakeup[] = {0x55, 0x55, 0x00, 0x00, 0x00};
-    pn532_uart_send(wakeup, sizeof(wakeup));
-    k_msleep(2);
-    pn532_uart_flush();
+    pn532_wakeup();
 
     /* ---- SAMConfig ---- */
-    uint8_t samconfig_cmd[] = {
-        0x00, 0xFF, 0x05, 0xFB,
-        0xD4, 0x14,
-        0x01, 0x14, 0x01,
-        0x02,
-        0x00
-    };
-
-    if (!send_command_get_ack(samconfig_cmd, sizeof(samconfig_cmd), 200)) {
-        LOG_ERR("SAMConfig: No ACK");
-        return 0;
-    }
-    LOG_INF("SAMConfig ACK OK");
-
-    memset(buf, 0, sizeof(buf));
-    len = pn532_uart_read(buf, sizeof(buf), 300);
-    if (len <= 0 || buf[6] != 0x15) {
-        LOG_ERR("SAMConfig response failed");
-        return 0;
-    }
-    LOG_INF("SAMConfig response OK");
-
-#ifdef CONFIG_PN532_BAUD_921600
-    LOG_INF("Configuring PN532 to 921600 baud...");
-    /* ---- SetSerialBaudRate to 921600 (BR=0x07) ----
-     *
-     * Frame: 00 FF 03 FD D4 10 07 15 00
-     *   LEN=03, LCS=FD, TFI=D4, CMD=10, BR=07, DCS=15, Postamble=00
-     */
-    uint8_t set_baud_cmd[] = {
-        0x00, 0xFF,
-        0x03, 0xFD,
-        0xD4, 0x10, 0x07,
-        0x15,
-        0x00
-    };
-
-    if (!send_command_get_ack(set_baud_cmd, sizeof(set_baud_cmd), 200)) {
-        LOG_ERR("SetSerialBaudRate: No ACK");
-        return 0;
-    }
-    LOG_INF("SetSerialBaudRate ACK OK");
-
-    /* Read the D5 11 response — still at 115200 */
-    memset(buf, 0, sizeof(buf));
-    len = pn532_uart_read(buf, sizeof(buf), 200);
-    if (len <= 0) {
-        LOG_ERR("SetSerialBaudRate: No response");
-        return 0;
-    }
-    LOG_INF("SetSerialBaudRate response OK");
-
-    /* Per datasheet: PN532 switches AFTER receiving our ACK.
-     * Send ACK at 115200, then switch host side. */
-    pn532_send_ack();
-
-    /* Wait >= 200 µs as required by the datasheet before next command */
-    k_usleep(500);
-
-    /* Switch host UART to 921600 */
-    if (set_host_baudrate(921600) != 0) {
-        return 0;
-    }
-    LOG_INF("Host UART switched to 921600");
-
-    /* Flush any garbage from the baud-rate transition */
-    k_msleep(2);
-    pn532_uart_flush();
-#endif /* CONFIG_PN532_BAUD_921600 */
-
-    /* ---- getFirmwareVersion ---- */
-    uint8_t fw_cmd[] = {
-        0x00, 0xFF, 0x02, 0xFE,
-        0xD4, 0x02,
-        0x2A,
-        0x00
-    };
-
-    if (!send_command_get_ack(fw_cmd, sizeof(fw_cmd), 200)) {
-        LOG_ERR("GetFirmwareVersion: No ACK");
-        return 0;
-    }
-    LOG_INF("GetFirmwareVersion ACK OK");
-
-    memset(buf, 0, sizeof(buf));
-    len = pn532_uart_read(buf, sizeof(buf), 300);
-    if (len <= 0) {
-        LOG_ERR("GetFirmwareVersion: No response");
+    if (!pn532_sam_config()) {
+        LOG_ERR("SAMConfig failed");
         return 0;
     }
 
-    LOG_INF("Response received");
-    LOG_INF("Found chip PN5%02X", buf[7]);
-    LOG_INF("Firmware version: %d.%d", buf[8], buf[9]);
+    /* ---- SetSerialBaudRate ---- */
+    if (!pn532_set_serial_baudrate(230400)) {
+        LOG_ERR("SetSerialBaudRate failed");
+        return 0;
+    }
 
-    while (1) {
-        k_msleep(1000);
+    /* ---- GetFirmwareVersion ---- */
+    struct pn532_fw_version fw_version = {0};
+    if (!pn532_get_firmware_version(&fw_version)) {
+        LOG_ERR("GetFirmwareVersion failed");
+        return 0;
+    }
+    LOG_INF("Found PN5%02X", fw_version.ic);
+    LOG_INF("Firmware version: %d.%d", fw_version.ver, fw_version.rev);
+
+    /* ---- InListPassiveTarget ---- */
+    while (1)
+    {
+        if (!pn532_in_list_passive_target()) {
+            LOG_DBG("No card detected, retrying...");
+            k_msleep(500);
+            continue;
+        }
+        LOG_INF("Detected something...");
+        break;
+    }
+    LOG_DBG("InListPassiveTarget successful...");
+
+    /* ---- InDataExchange ---- */
+    uint8_t response[2] = {0};
+    uint8_t responseLength = sizeof(response);
+    if (!pn532_in_data_exchange((uint8_t *)SELECT_APDU_CMD,
+                                sizeof(SELECT_APDU_CMD),
+                                response,
+                                &responseLength)) {
+        LOG_ERR("inDataExchange failed");
+        return 0;
+    }
+    LOG_DBG("Received response (%d bytes):", responseLength);
+    LOG_HEXDUMP_DBG(response, responseLength, "Response");
+
+    /* We're expecting 0x90 0x00 from the Android phone HCE app */
+    if ((response[0] != 0x90) || (response[1] != 0x00)) {
+        LOG_ERR("SELECT APDU failed");
+        return 0;
+    }
+    LOG_INF("SELECT APDU successful...");
+
+    while (1)
+    {
+        k_msleep(100);
     }
 
     return 0;
