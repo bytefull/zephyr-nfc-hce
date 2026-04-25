@@ -8,6 +8,12 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 
 - [x] Adding a ring buffer instead of managing a raw buffer and its rx length
 
+- [x] Normalize all functions to fail fast ie: check failed condition first and exit early
+
+- [x] Normalize all functions and variables naming
+
+- [x] Normalize comments + doxygen
+
 - [ ] Encapsulate the waiting for response after each command into a function (eg: pn532_read_response)
 
 - [ ] Organize the code in separate pn532.c and pn532.h files with clean APIs
