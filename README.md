@@ -4,9 +4,7 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 
 ## ✅ TODO
 
-- [ ] Find an easier more cleaner way of managing the rx_len
-
-- [ ] Maybe add semaphore instead odf using delays
+- [x] Verify APDU responses
 
 - [ ] Encapsulate the waiting for response after each command into a function (eg: pn532_read_response)
 

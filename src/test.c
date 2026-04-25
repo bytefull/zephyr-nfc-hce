@@ -2,7 +2,7 @@
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/logging/log.h>
-LOG_MODULE_REGISTER(test, LOG_LEVEL_INF);
+LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
 
 #define PN532_PREAMBLE (0x00)   ///< Command sequence start, byte 1/3
 #define PN532_STARTCODE1 (0x00) ///< Command sequence start, byte 2/3
@@ -22,11 +22,14 @@ uint8_t pn532_packetbuffer[PN532_PACKBUFFSIZ]; ///< Packet buffer used in variou
 #define PN532_COMMAND_SAMCONFIGURATION (0x14)      ///< SAM configuration
 #define PN532_COMMAND_INLISTPASSIVETARGET (0x4A)   ///< List passive target
 #define PN532_COMMAND_INDATAEXCHANGE (0x40)        ///< Data exchange
+#define PN532_RESPONSE_INLISTPASSIVETARGET (0x4B) ///< List passive target
+#define PN532_RESPONSE_INDATAEXCHANGE (0x41)      ///< Data exchange
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
 static uint8_t rx_buf[256] = {0};
 static volatile size_t rx_len = 0;
+static int8_t _inListedTag; // Tg number of inlisted tag.
 
 static const uint8_t ack[] = {
     0x00, /* Preamble */
@@ -68,17 +71,20 @@ static void uart_cb(const struct device *dev, void *user_data)
         return;
     }
 
-    if (uart_irq_rx_ready(dev)) {
-        if (rx_len >= sizeof(rx_buf)) {
-            LOG_ERR("RX buffer overflow");
-            rx_len = 0;
-            return;
-        }
-        int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
-        if (len > 0) {
-            rx_len += len;
-            LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
-        }
+    if (!uart_irq_rx_ready(dev)) {
+        return;
+    }
+
+    if (rx_len >= sizeof(rx_buf)) {
+        LOG_ERR("RX buffer overflow");
+        rx_len = 0;
+        return;
+    }
+
+    int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
+    if (len > 0) {
+        rx_len += len;
+        LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
     }
 }
 
@@ -143,17 +149,17 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
     /* Send command */
     writecommand((uint8_t *)cmd, cmd_len);
 
-    /* Wait for ACK (we’re willing to wait 200 ms for ack) */
+    /* Wait for ACK */
     if (!wait_for_rx(sizeof(ack), timeout_ms)) {
         LOG_ERR("Timeout waiting for ACK");
         return false;
     }
 
+    /* Check if the received data matches the expected ACK */
     if (memcmp(rx_buf, ack, sizeof(ack)) != 0) {
         LOG_ERR("Invalid ACK");
         return false;
     }
-
     LOG_DBG("ACK received");
 
     /* Did the response already start arriving right after ACK? */
@@ -161,7 +167,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         return true;
     }
 
-    /* Otherwise wait for a little bit more */
+    /* Otherwise wait for a little bit more for the response to arrive after ACK */
     int64_t end = k_uptime_get() + timeout_ms;
     while (k_uptime_get() < end) {
         if (rx_len > sizeof(ack)) {
@@ -171,7 +177,7 @@ static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_m
         k_sleep(K_USEC(100));
     }
 
-    LOG_ERR("Timeout waiting for response after the ack");
+    // LOG_ERR("Timeout waiting for response after the ack");
     return false;
 }
 
@@ -249,13 +255,43 @@ int main(void)
             k_msleep(100);
             continue;
         } else {
-            LOG_INF("InListPassiveTarget OK");
+            LOG_INF("Detected something! Processing response...");
+            uint8_t offset = sizeof(ack);
+            if ((rx_buf[offset] == 0) && (rx_buf[offset + 1] == 0) && (rx_buf[offset + 2] == 0xff)) {
+                uint8_t length = rx_buf[offset + 3];
+                if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+                    LOG_ERR("Length check invalid");
+                    LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+                    return false;
+                }
+                if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
+                    rx_buf[offset + 6] == PN532_RESPONSE_INLISTPASSIVETARGET) {
+                    if (rx_buf[offset + 7] != 1) {
+                        LOG_ERR("Unhandled number of targets inlisted");
+                        LOG_DBG("Number of tags inlisted: 0x%02X", rx_buf[offset + 7]);
+                        return false;
+                    }
+                    _inListedTag = rx_buf[offset + 8];
+                    LOG_DBG("Tag number: %d", _inListedTag);
+                    LOG_INF("InListPassiveTarget OK");
+                    break;
+                } else {
+                    LOG_ERR("Unexpected response to inlist passive host");
+                    return false;
+                }
+            } else {
+                LOG_ERR("Preamble missing");
+                return false;
+            }
             break;
         }
     }
 
     /* ---- InDataExchange ---- */
     LOG_INF("Sending InDataExchange command");
+    uint8_t response[128] = {0};
+    uint8_t responseLength = sizeof(response);
+
     pn532_packetbuffer[0] = PN532_COMMAND_INDATAEXCHANGE;
     pn532_packetbuffer[1] = 1; // Target number (only one target supported in this example)
     for (int i = 0; i < sizeof(selectApduCmd); ++i) {
@@ -265,8 +301,41 @@ int main(void)
         LOG_ERR("SELECT APDU failed");
         return 0;
     }
-    LOG_INF("InDataExchange OK");
-    LOG_INF("SELECT APDU successful...");
+    int offset = sizeof(ack);
+    if (rx_buf[offset] == 0 && rx_buf[offset + 1] == 0 && rx_buf[offset + 2] == 0xff) {
+        uint8_t length = rx_buf[offset + 3];
+        if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+            LOG_ERR("Length check invalid");
+            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+            return false;
+        }
+        if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
+            rx_buf[offset + 6] == PN532_RESPONSE_INDATAEXCHANGE) {
+            if ((rx_buf[offset + 7] & 0x3f) != 0) {
+                LOG_ERR("Status code indicates an error");
+                return false;
+            }
+
+            length -= 3;
+
+            if (length > responseLength) {
+                length = responseLength; // silent truncation...
+            }
+
+            for (int i = 0; i < length; ++i) {
+                response[i] = rx_buf[offset + 8 + i];
+            }
+            responseLength = length;
+            LOG_INF("InDataExchange OK");
+            LOG_INF("SELECT APDU successful...");
+        } else {
+            LOG_ERR("Don't know how to handle this command");
+            return false;
+        }
+    } else {
+        LOG_ERR("Preamble missing");
+        return false;
+    }
 
     while (1)
     {
