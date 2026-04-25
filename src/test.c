@@ -320,11 +320,14 @@ bool inListPassiveTarget() {
     pn532_packetbuffer[0] = PN532_COMMAND_INLISTPASSIVETARGET;
     pn532_packetbuffer[1] = 0x01;
     pn532_packetbuffer[2] = 0x00;
-    if (!pn532_send_command(pn532_packetbuffer, 3, 1000)) {
-        LOG_DBG("Nothing detected, retrying...");
+    if (!pn532_send_command(pn532_packetbuffer, 3, 1200)) {
         return false;
     }
-    LOG_INF("Detected something! Processing response...");
+    /* Wait for a little bit until we receive the 24 bytes of the InListPassiveTarget response */
+    if (!wait_for_rx(24, 1200)) {
+        LOG_ERR("Timeout waiting for InListPassiveTarget response");
+        return false;
+    }
     /* Read the inListPassiveTarget response */
     uint8_t response_buf[24] = {0};
     if (ring_buf_get(&rx_ringbuf, response_buf, 24) != 24) {
@@ -381,10 +384,21 @@ bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_
         LOG_ERR("inDataExchange command failed");
         return false;
     }
+    /* Wait for a little bit until we receive the 10 bytes + expected given response length */
+    /* TODO: Maybe ignore the timeout here and only raise a warning
+             since the user doesn't necessarily know how many bytes to expect in the response */
+    if (!wait_for_rx(*responseLength+10, 1000)) {
+        LOG_ERR("Timeout waiting for inDataExchange response");
+        return false;
+    }
     /* Read the inDataExchange response */
     uint8_t response_buf[128] = {0};
-    if (!ring_buf_get(&rx_ringbuf, response_buf, 128)) {
+    /* TODO: Maybe ignore the check here and only raise a warning
+             since the user doesn't necessarily know how many bytes to expect in the response */
+    uint32_t len = ring_buf_get(&rx_ringbuf, response_buf, sizeof(response_buf));
+    if (len != *responseLength + 10) {
         LOG_ERR("Failed to read inDataExchange response");
+        LOG_WRN("Expected %d bytes but got %d", *responseLength + 10, len);
         return false;
     }
     /* Verify response buffer */
@@ -411,6 +425,7 @@ bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_
                 response[i] = response_buf[8 + i];
             }
             *responseLength = length;
+            LOG_INF("InDataExchange OK");
             return true;
         } else {
             LOG_ERR("Don't know how to handle this command");
@@ -456,6 +471,7 @@ int main(void)
     while (1)
     {
         if (inListPassiveTarget()) {
+            LOG_INF("Detected something...");
             break;
         }
         LOG_DBG("No card detected, retrying...");
@@ -464,13 +480,12 @@ int main(void)
     LOG_INF("InListPassiveTarget successful...");
 
     /* ---- InDataExchange ---- */
-    uint8_t response[128] = {0};
+    uint8_t response[2] = {0};
     uint8_t responseLength = sizeof(response);
     if (!inDataExchange((uint8_t *)selectApduCmd, sizeof(selectApduCmd), response, &responseLength)) {
         LOG_ERR("inDataExchange failed");
         return 0;
     }
-    LOG_INF("InDataExchange OK");
     LOG_DBG("Received response (%d bytes):", responseLength);
     LOG_HEXDUMP_DBG(response, responseLength, "Response");
     LOG_INF("SELECT APDU successful...");

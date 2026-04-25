@@ -15,3 +15,5 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 - [ ] Start to work on structuring those files as a zephyr out of tree driver
 
 - [ ] Start work on the application and the challenge response protocol using the APDUs
+
+- [ ] Increase UART baudrate to 921600 in initialization, right after SAMConfig
