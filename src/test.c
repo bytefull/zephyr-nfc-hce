@@ -1,6 +1,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/uart.h>
+#include <zephyr/sys/ring_buffer.h>
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(test, LOG_LEVEL_DBG);
 
@@ -32,18 +33,19 @@ struct pn532_fw_version
     uint8_t rev; ///< Firmware revision
 };
 
-static const 
-uint8_t pn532response_firmwarevers[] = {
+///< Expected firmware version message from PN532
+static const uint8_t PN532_EXPECTED_FIRMWARE_VERSION[] = {
     0x00, 0x00, 0xFF,
-    0x06, 0xFA, 0xD5}; ///< Expected firmware version message from PN532
+    0x06, 0xFA, 0xD5
+};
 
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
-static uint8_t rx_buf[256] = {0};
-static volatile size_t rx_len = 0;
-static int8_t _inListedTag; // Tg number of inlisted tag.
+static int8_t _inListedTag = -1; // Tg number of inlisted tag.
 
-static const uint8_t ack[] = {
+RING_BUF_DECLARE(rx_ringbuf, 256);
+
+static const uint8_t PN532_ACK[] = {
     0x00, /* Preamble */
     0x00, /* Start code 1 */
     0xFF, /* Start code 2 */
@@ -78,6 +80,8 @@ static const  uint8_t selectApduCmd[] = {
 static void uart_cb(const struct device *dev, void *user_data)
 {
     ARG_UNUSED(user_data);
+    int len = 0;
+    uint8_t chunk[32] = {0};
 
     if (!uart_irq_update(dev)) {
         return;
@@ -87,16 +91,16 @@ static void uart_cb(const struct device *dev, void *user_data)
         return;
     }
 
-    if (rx_len >= sizeof(rx_buf)) {
-        LOG_ERR("RX buffer overflow");
-        rx_len = 0;
+    len = uart_fifo_read(dev, chunk, sizeof(chunk));
+    if (len <= 0) {
+        LOG_WRN("No bytes found in UART FIFO");
         return;
     }
+    LOG_HEXDUMP_DBG(chunk, len, "RX chunk");
 
-    int len = uart_fifo_read(dev, rx_buf + rx_len, sizeof(rx_buf) - rx_len);
-    if (len > 0) {
-        rx_len += len;
-        LOG_HEXDUMP_DBG(rx_buf, rx_len, "RX");
+    if (ring_buf_put(&rx_ringbuf, chunk, len) != len) {
+        LOG_ERR("Failed to put %d bytes into RX ring buffer", len);
+        return;
     }
 }
 
@@ -114,6 +118,7 @@ static bool wait_for_rx(size_t expected_len, int timeout_ms)
     int64_t end = k_uptime_get() + timeout_ms;
 
     while (k_uptime_get() < end) {
+        uint32_t rx_len = ring_buf_size_get(&rx_ringbuf);
         if (rx_len >= expected_len) {
             return true;
         }
@@ -155,42 +160,49 @@ void writecommand(uint8_t *cmd, uint8_t cmdlen) {
 
 static bool pn532_send_command(const uint8_t *cmd, size_t cmd_len, int timeout_ms)
 {
-    /* Reset RX buffer */
-    rx_len = 0;
+    uint8_t ack[sizeof(PN532_ACK)] = {0};
+    uint32_t len = 0;
+
+    /* Flush the RX ring buffer each time we want to send a command */
+    ring_buf_reset(&rx_ringbuf);
 
     /* Send command */
     writecommand((uint8_t *)cmd, cmd_len);
 
-    /* Wait for ACK */
+    /* Wait for 6 bytes of ACK */
     if (!wait_for_rx(sizeof(ack), timeout_ms)) {
         LOG_ERR("Timeout waiting for ACK");
         return false;
     }
 
-    /* Check if the received data matches the expected ACK */
-    if (memcmp(rx_buf, ack, sizeof(ack)) != 0) {
+    /* Read the ACK bytes */
+    len = ring_buf_get(&rx_ringbuf, ack, sizeof(ack));
+    if (len != sizeof(ack)) {
+        LOG_ERR("Failed to read ACK, expected %d bytes but got %d", sizeof(ack), len);
+        return false;
+    }
+
+    /* Check if the received bytes match the expected ACK */
+    if (memcmp(ack, PN532_ACK, sizeof(PN532_ACK)) != 0) {
         LOG_ERR("Invalid ACK");
         return false;
     }
     LOG_DBG("ACK received");
 
-    /* Did the response already start arriving right after ACK? */
-    if (rx_len > sizeof(ack)) {
+    /* Did the response already start arriving right after reading the ACK? */
+    if (ring_buf_size_get(&rx_ringbuf)) {
+        LOG_DBG("Response already started arriving right after ACK");
         return true;
     }
 
-    /* Otherwise wait for a little bit more for the response to arrive after ACK */
-    int64_t end = k_uptime_get() + timeout_ms;
-    while (k_uptime_get() < end) {
-        if (rx_len > sizeof(ack)) {
-            LOG_DBG("Response received");
-            return true;
-        }
-        k_sleep(K_USEC(100));
+    /* Otherwise wait for a little bit more for the response to arrive */
+    if (!wait_for_rx(1, timeout_ms)) {
+        LOG_ERR("Timeout waiting for response");
+        return false;
     }
 
-    LOG_ERR("Timeout waiting for response after the ack");
-    return false;
+    LOG_DBG("Response received");
+    return true;
 }
 
 /**************************************************************************/
@@ -222,21 +234,32 @@ bool SAMConfig(void) {
         LOG_ERR("SAMConfig failed");
         return false;
     }
-    /* Wait for a little bit until we receive the 15 bytes of the SAMConfig response */
-    if (!wait_for_rx(15, 100)) {
+    /* Wait for a little bit until we receive the 9 bytes: size of the SAMConfig response */
+    if (!wait_for_rx(9, 100)) {
         LOG_ERR("Timeout waiting for SAMConfig response");
         return false;
     }
-    int offset = sizeof(ack);
-    if (rx_buf[offset] != 0 || rx_buf[offset + 1] != 0 || rx_buf[offset + 2] != 0xff) {
+    /* Read the SAMConfig response */
+    uint8_t response_buf[9] = {0};
+    if (ring_buf_get(&rx_ringbuf, response_buf, 9) != 9) {
+        LOG_ERR("Failed to read SAMConfig response");
+        return false;
+    }
+    /* Verify response buffer */
+    if (response_buf[0] != 0 || response_buf[1] != 0 || response_buf[2] != 0xff) {
         LOG_ERR("Preamble missing");
         return false;
     }
-    /* I don't know what is byte 4 and 5 used for */
-    if (rx_buf[offset + 6] != 0x15) {
-        LOG_ERR("Invalid SAMConfig response: 0x%02X", rx_buf[offset + 6]);
+    /* I don't know what is byte 4 used for */
+    if (response_buf[5] != PN532_PN532TOHOST) {
+        LOG_ERR("Invalid SAMConfig response: 0x%02X", response_buf[5]);
         return false;
     }
+    if (response_buf[6] != 0x15) {
+        LOG_ERR("Invalid SAMConfig response: 0x%02X", response_buf[6]);
+        return false;
+    }
+
     LOG_INF("SAMConfig OK");
     return true;
 }
@@ -255,26 +278,32 @@ bool getFirmwareVersion(struct pn532_fw_version *fw_version) {
         LOG_ERR("GetFirmwareVersion failed");
         return false;
     }
-    /* Wait for a little bit until we receive the 19 bytes of the GetFirmwareVersion response */
-    if (!wait_for_rx(19, 100)) {
+    /* Wait for a little bit until we receive the 13 bytes of the GetFirmwareVersion response */
+    if (!wait_for_rx(13, 100)) {
         LOG_ERR("Timeout waiting for GetFirmwareVersion response");
         return false;
     }
-    if (rx_buf[sizeof(ack) + 5] != PN532_PN532TOHOST || rx_buf[sizeof(ack) + 6] != 0x03) {
+    /* Read the GetFirmwareVersion response */
+    uint8_t response_buf[13] = {0};
+    if (ring_buf_get(&rx_ringbuf, response_buf, 13) != 13) {
+        LOG_ERR("Failed to read GetFirmwareVersion response");
+        return false;
+    }
+    /* Verify response buffer */
+    if (response_buf[5] != PN532_PN532TOHOST || response_buf[6] != 0x03) {
         LOG_ERR("Unexpected response to GetFirmwareVersion");
         return false;
     }
-
-    if (memcmp(rx_buf + sizeof(ack),
-               pn532response_firmwarevers,
-               sizeof(pn532response_firmwarevers)) != 0) {
-        LOG_ERR("Unexpected firmware version");
+    if (memcmp(response_buf,
+               PN532_EXPECTED_FIRMWARE_VERSION,
+               sizeof(PN532_EXPECTED_FIRMWARE_VERSION)) != 0) {
+        LOG_ERR("Unexpected firmware version response");
         return false;
     }
 
-    fw_version->ic = rx_buf[sizeof(ack) + 7];
-    fw_version->ver = rx_buf[sizeof(ack) + 8];
-    fw_version->rev = rx_buf[sizeof(ack) + 9];
+    fw_version->ic = response_buf[7];
+    fw_version->ver = response_buf[8];
+    fw_version->rev = response_buf[9];
     LOG_INF("GetFirmwareVersion OK");
     return true;
 }
@@ -296,22 +325,28 @@ bool inListPassiveTarget() {
         return false;
     }
     LOG_INF("Detected something! Processing response...");
-    uint8_t offset = sizeof(ack);
-    if ((rx_buf[offset] == 0) && (rx_buf[offset + 1] == 0) && (rx_buf[offset + 2] == 0xff)) {
-        uint8_t length = rx_buf[offset + 3];
-        if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+    /* Read the inListPassiveTarget response */
+    uint8_t response_buf[24] = {0};
+    if (ring_buf_get(&rx_ringbuf, response_buf, 24) != 24) {
+        LOG_ERR("Failed to read inListPassiveTarget response");
+        return false;
+    }
+    /* Verify response buffer */
+    if ((response_buf[0] == 0) && (response_buf[1] == 0) && (response_buf[2] == 0xff)) {
+        uint8_t length = response_buf[3];
+        if (response_buf[4] != (uint8_t)(~length + 1)) {
             LOG_ERR("Length check invalid");
-            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), response_buf[4]);
             return false;
         }
-        if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
-            rx_buf[offset + 6] == PN532_RESPONSE_INLISTPASSIVETARGET) {
-            if (rx_buf[offset + 7] != 1) {
+        if (response_buf[5] == PN532_PN532TOHOST &&
+            response_buf[6] == PN532_RESPONSE_INLISTPASSIVETARGET) {
+            if (response_buf[7] != 1) {
                 LOG_ERR("Unhandled number of targets inlisted");
-                LOG_DBG("Number of tags inlisted: 0x%02X", rx_buf[offset + 7]);
+                LOG_DBG("Number of tags inlisted: 0x%02X", response_buf[7]);
                 return false;
             }
-            _inListedTag = rx_buf[offset + 8];
+            _inListedTag = response_buf[8];
             LOG_DBG("Tag number: %d", _inListedTag);
             LOG_INF("InListPassiveTarget OK");
             return true;
@@ -346,17 +381,23 @@ bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_
         LOG_ERR("inDataExchange command failed");
         return false;
     }
-    int offset = sizeof(ack);
-    if (rx_buf[offset] == 0 && rx_buf[offset + 1] == 0 && rx_buf[offset + 2] == 0xff) {
-        uint8_t length = rx_buf[offset + 3];
-        if (rx_buf[offset + 4] != (uint8_t)(~length + 1)) {
+    /* Read the inDataExchange response */
+    uint8_t response_buf[128] = {0};
+    if (!ring_buf_get(&rx_ringbuf, response_buf, 128)) {
+        LOG_ERR("Failed to read inDataExchange response");
+        return false;
+    }
+    /* Verify response buffer */
+    if (response_buf[0] == 0 && response_buf[1] == 0 && response_buf[2] == 0xff) {
+        uint8_t length = response_buf[3];
+        if (response_buf[4] != (uint8_t)(~length + 1)) {
             LOG_ERR("Length check invalid");
-            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), rx_buf[offset + 4]);
+            LOG_DBG("Expected: 0x%02X, Got: 0x%02X", (uint8_t)(~length + 1), response_buf[4]);
             return false;
         }
-        if (rx_buf[offset + 5] == PN532_PN532TOHOST &&
-            rx_buf[offset + 6] == PN532_RESPONSE_INDATAEXCHANGE) {
-            if ((rx_buf[offset + 7] & 0x3f) != 0) {
+        if (response_buf[5] == PN532_PN532TOHOST &&
+            response_buf[6] == PN532_RESPONSE_INDATAEXCHANGE) {
+            if ((response_buf[7] & 0x3f) != 0) {
                 LOG_ERR("Status code indicates an error");
                 return false;
             }
@@ -367,7 +408,7 @@ bool inDataExchange(uint8_t *send, uint8_t sendLength, uint8_t *response, uint8_
             }
 
             for (int i = 0; i < length; ++i) {
-                response[i] = rx_buf[offset + 8 + i];
+                response[i] = response_buf[8 + i];
             }
             *responseLength = length;
             return true;
