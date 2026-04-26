@@ -31,6 +31,13 @@ int main(void) {
         return 0;
     }
 
+#if 0
+	/* --- SetSerialBaudRate --- */
+    if (pn532_set_serial_baudrate(dev, 230400) < 0) {
+        LOG_ERR("Failed to set serial baud rate");
+        return 0;
+    }
+#endif
     /* ---- GetFirmwareVersion ---- */
     struct pn532_fw_version version = {0};
     if (pn532_get_firmware_version(dev, &version) < 0) {
