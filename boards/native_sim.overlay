@@ -1,9 +1,3 @@
-/ {
-	aliases {
-		pn532-uart = &uart1;
-	};
-};
-
 &uart1 {
     status = "okay";
 	compatible = "zephyr,native-tty-uart";

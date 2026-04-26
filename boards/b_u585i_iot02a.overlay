@@ -1,9 +1,3 @@
-/ {
-	aliases {
-		pn532-uart = &usart3;
-	};
-};
-
 &usart3 {
     status = "okay";
     current-speed = <115200>;
