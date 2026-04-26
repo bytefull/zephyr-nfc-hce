@@ -6,5 +6,4 @@ project(zephyr_nfc_hce)
 
 target_sources(app PRIVATE
     src/main.c
-    src/pn532.c
 )

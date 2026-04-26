@@ -3,3 +3,12 @@
 		pn532-uart = &usart3;
 	};
 };
+
+&usart3 {
+    status = "okay";
+    current-speed = <115200>;
+
+    pn532 {
+        compatible = "nxp,pn532";
+    };
+};
