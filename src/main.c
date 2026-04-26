@@ -34,12 +34,6 @@ int main(void)
         return 0;
     }
 
-    /* ---- SetSerialBaudRate ---- */
-    if (!pn532_set_serial_baudrate(230400)) {
-        LOG_ERR("SetSerialBaudRate failed");
-        return 0;
-    }
-
     /* ---- GetFirmwareVersion ---- */
     struct pn532_fw_version fw_version = {0};
     if (!pn532_get_firmware_version(&fw_version)) {

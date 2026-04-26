@@ -41,15 +41,20 @@ LOG_MODULE_REGISTER(pn532, LOG_LEVEL_DBG);
  *     − 0X07: 921.6 kbaud,
  *     − 0x08: 1.288 Mbaud.
  */
-#define PN532_BAUDRATE_9600   (0x00)  /* 9.6 kbaud */
-#define PN532_BAUDRATE_19200  (0x01)  /* 19.2 kbaud */
-#define PN532_BAUDRATE_38400  (0x02)  /* 38.4 kbaud */
-#define PN532_BAUDRATE_57600  (0x03)  /* 57.6 kbaud */
-#define PN532_BAUDRATE_115200 (0x04)  /* 115.2 kbaud */
-#define PN532_BAUDRATE_230400 (0x05)  /* 230.4 kbaud */
-#define PN532_BAUDRATE_460800 (0x06)  /* 460.8 kbaud */
-#define PN532_BAUDRATE_921600 (0x07)  /* 921600 baud */
+#define PN532_BAUDRATE_9600    (0x00) /* 9.6 kbaud */
+#define PN532_BAUDRATE_19200   (0x01) /* 19.2 kbaud */
+#define PN532_BAUDRATE_38400   (0x02) /* 38.4 kbaud */
+#define PN532_BAUDRATE_57600   (0x03) /* 57.6 kbaud */
+#define PN532_BAUDRATE_115200  (0x04) /* 115.2 kbaud */
+#define PN532_BAUDRATE_230400  (0x05) /* 230.4 kbaud */
+#define PN532_BAUDRATE_460800  (0x06) /* 460.8 kbaud */
+#define PN532_BAUDRATE_921600  (0x07) /* 921600 baud */
 #define PN532_BAUDRATE_1288000 (0x08) /* 1.288 Mbaud */
+
+#define PN532_DEFAULT_BAUDRATE (PN532_BAUDRATE_115200)
+
+/* Maximum size of a PN532 frame (including header and checksum) */
+#define PN532_MAX_FRAME_SIZE (64)
 
 /* Expected firmware version message from PN532 */
 static const uint8_t PN532_EXPECTED_FIRMWARE_VERSION[] = {
@@ -79,7 +84,7 @@ static const uint8_t PN532_WAKEUP_SEQ[] = {
 static const struct device *uart_dev = DEVICE_DT_GET(DT_ALIAS(pn532_uart));
 
 /* Buffer for building commands to send to PN532 */
-static uint8_t pn532_tx_buffer[64] = {0};
+static uint8_t pn532_tx_buffer[PN532_MAX_FRAME_SIZE] = {0};
 
 /* RX ring buffer for storing incoming data from PN532 */
 RING_BUF_DECLARE(pn532_rx_ring_buffer, 256);
@@ -309,7 +314,9 @@ bool pn532_sam_config(void) {
         return false;
     }
     /* Verify response buffer */
-    if ((response_buf[0] != 0) || (response_buf[1] != 0) || (response_buf[2] != 0xff)) {
+    if ((response_buf[0] != PN532_PREAMBLE) ||
+        (response_buf[1] != PN532_STARTCODE1) ||
+        (response_buf[2] != PN532_STARTCODE2)) {
         LOG_ERR("Preamble missing");
         return false;
     }
@@ -379,7 +386,9 @@ bool pn532_set_serial_baudrate(uint32_t baudrate) {
         return false;
     }
     /* Verify response buffer */
-    if ((response_buf[0] != 0) || (response_buf[1] != 0) || (response_buf[2] != 0xff)) {
+    if ((response_buf[0] != PN532_PREAMBLE) ||
+        (response_buf[1] != PN532_STARTCODE1) ||
+        (response_buf[2] != PN532_STARTCODE2)) {
         LOG_ERR("Preamble missing");
         return false;
     }
@@ -481,7 +490,9 @@ bool pn532_in_list_passive_target() {
         return false;
     }
     /* Verify response preamble */
-    if ((response_buf[0] != 0) || (response_buf[1] != 0) || (response_buf[2] != 0xff)) {
+    if ((response_buf[0] != PN532_PREAMBLE) ||
+        (response_buf[1] != PN532_STARTCODE1) ||
+        (response_buf[2] != PN532_STARTCODE2)) {
         LOG_ERR("Preamble missing");
         return false;
     }
@@ -562,7 +573,9 @@ bool pn532_in_data_exchange(uint8_t *send, uint8_t sendLength, uint8_t *response
                 len);
     }
     /* Verify response preamble */
-    if ((response_buf[0] != 0) || (response_buf[1] != 0) || (response_buf[2] != 0xff)) {
+    if ((response_buf[0] != PN532_PREAMBLE) ||
+        (response_buf[1] != PN532_STARTCODE1) ||
+        (response_buf[2] != PN532_STARTCODE2)) {
         LOG_ERR("Invalid response preamble");
         return false;
     }
