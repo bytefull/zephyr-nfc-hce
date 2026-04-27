@@ -23,7 +23,7 @@ manifest:
 
     - name: pn532
       remote: bytefull
-      revision: dev
+      revision: main
       repo-path: pn532
       path: dependencies/modules/pn532
       import: true
