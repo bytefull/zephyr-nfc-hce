@@ -20,6 +20,7 @@ manifest:
         name-allowlist:
           - cmsis_6
           - hal_stm32
+          - mbedtls
 
     - name: pn532
       remote: bytefull
