@@ -16,8 +16,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 #define NONCE_SIZE             (32U)
 #define APDU_RESPONSE_MAX_SIZE (255U)
 
-static psa_status_t verify_android_signature(const uint8_t *nonce, const uint8_t *signature,
-					     size_t sig_len);
+static int verify_android_signature(const uint8_t *nonce, const uint8_t *signature, size_t sig_len);
 
 /*
  * SELECT APDU (AID selection)
@@ -54,28 +53,6 @@ static const uint8_t AUTHORIZED_PUBLIC_KEY[] = {
 	0x92, 0x5c, 0xc8, 0xbc, 0xfa, 0xf0, 0x12, 0x22, 0x94, 0x72, 0x04, 0x9e, 0x9f,
 	0x49, 0x6a, 0x44, 0xa8, 0x37, 0x72, 0xae, 0x79, 0x2f, 0x2b, 0x9d, 0x56, 0x62,
 	0xfe, 0x95, 0x1e, 0x46, 0x0a, 0x19, 0xa2, 0x9f, 0x28, 0x5c, 0x47, 0x04, 0x13};
-
-/*
- * Fake nonce (32 bytes)
- * This should be the same nonce that the Android device will sign and return in the response
- */
-static const uint8_t FAKE_NONCE[] = {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-				     0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
-				     0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-				     0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F};
-
-/*
- * Fake signature of the above nonce (DER-encoded ECDSA signature, 64 bytes)
- * This should be the expected signature that the Android device will return in response to the
- * challenge APDU. It corresponds to the signature of the FAKE_NONCE using the private key
- * associated with AUTH
- */
-static const uint8_t FAKE_NONCE_SIGNED[] = {
-	0x30, 0x44, 0x02, 0x20, 0x57, 0xeb, 0xee, 0x04, 0x39, 0xd8, 0x1c, 0xe1, 0x64, 0xed,
-	0x0a, 0xb8, 0x85, 0x4d, 0x77, 0xb5, 0xc2, 0x17, 0x4e, 0x7b, 0xb3, 0x4d, 0xbf, 0xb4,
-	0x33, 0x96, 0xa8, 0xde, 0x3f, 0xad, 0x88, 0x9b, 0x02, 0x20, 0x27, 0x83, 0x38, 0x3c,
-	0xfe, 0x09, 0x4c, 0x99, 0x61, 0xca, 0x30, 0x70, 0xea, 0xb0, 0xf0, 0x4b, 0x80, 0xa6,
-	0x9c, 0xc0, 0x15, 0x4d, 0xce, 0x2e, 0xe9, 0xaf, 0x59, 0x42, 0xb9, 0xca, 0xdc, 0x69};
 
 int main(void)
 {
@@ -125,12 +102,10 @@ int main(void)
 		LOG_INF("AID selected");
 
 		/* 3. GENERATE NONCE */
-		// if (psa_generate_random(nonce, sizeof(nonce)) != PSA_SUCCESS) {
-		// 	LOG_ERR("Failed to generate nonce");
-		// 	continue;
-		// }
-		memcpy(nonce, FAKE_NONCE, sizeof(FAKE_NONCE));
-
+		if (psa_generate_random(nonce, sizeof(nonce)) != PSA_SUCCESS) {
+			LOG_ERR("Failed to generate nonce");
+			continue;
+		}
 		LOG_HEXDUMP_DBG(nonce, sizeof(nonce),
 				"Generated " STRINGIFY(NONCE_SIZE) "-byte nonce:");
 
@@ -150,9 +125,13 @@ int main(void)
 		LOG_HEXDUMP_DBG(response, resp_len, "Response:");
 
 		/* 4. VERIFY RESPONSE */
-		if ((resp_len < (sizeof(FAKE_NONCE_SIGNED) + 2)) ||
-		    (response[resp_len - 2] != 0x90) || (response[resp_len - 1] != 0x00)) {
-			LOG_WRN("Invalid response format");
+		if (resp_len >= 2) {
+			if ((response[resp_len - 2] != 0x90) || (response[resp_len - 1] != 0x00)) {
+				LOG_WRN("Invalid response format");
+				continue;
+			}
+		} else {
+			LOG_WRN("Signature response too short");
 			continue;
 		}
 
@@ -160,22 +139,10 @@ int main(void)
 		/* -2 to exclude the status words (SW1, SW2) at the end of the response */
 		size_t sig_len = resp_len - 2;
 
-		if (sig_len != sizeof(FAKE_NONCE_SIGNED)) {
-			LOG_ERR("Invalid signature length: %d", sig_len);
-			continue;
-		}
-
 		LOG_INF("Verifying signature...");
 
 		if (verify_android_signature(nonce, signature, sig_len) < 0) {
 			LOG_ERR("AUTH FAILED (signature invalid)");
-			continue;
-		}
-
-		if (memcmp(response, FAKE_NONCE_SIGNED, resp_len - 2) == 0) {
-			LOG_INF("Received expected fake signature response");
-		} else {
-			LOG_ERR("Received unexpected signature response");
 			continue;
 		}
 
@@ -207,8 +174,12 @@ static int verify_android_signature(const uint8_t *nonce, const uint8_t *signatu
 	}
 
 	/* 3. Verify Signature */
-	status = psa_verify_message(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), nonce, 32, signature,
-				    sig_len);
+	status = psa_verify_message(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), nonce, NONCE_SIZE,
+				    signature, sig_len);
+	if (status != PSA_SUCCESS) {
+		LOG_ERR("Signature verification failed (%d)", status);
+		/* Destroy the key before returning */
+	}
 
 	psa_destroy_key(key_id);
 
