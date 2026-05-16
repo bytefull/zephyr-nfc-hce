@@ -12,3 +12,11 @@ target_sources(app PRIVATE
     src/main.c
     src/web.c
 )
+
+zephyr_linker_sources(SECTIONS sections-rom.ld)
+zephyr_linker_section(NAME http_resource_desc_my_service
+                      KVMA RAM_REGION GROUP RODATA_REGION)
+
+set(gen_dir ${ZEPHYR_BINARY_DIR}/include/generated/)
+set(source_file_index src/index.html)
+generate_inc_file_for_target(app ${source_file_index} ${gen_dir}/index.html.gz.inc --gzip)
