@@ -13,8 +13,8 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 #include "pn532.h"
 
-#define NONCE_SIZE             (32U)
-#define APDU_RESPONSE_MAX_SIZE (255U)
+#define NONCE_SIZE 32
+#define APDU_RESPONSE_MAX_SIZE 255
 
 static int verify_android_signature(const uint8_t *nonce, const uint8_t *signature, size_t sig_len);
 
@@ -33,7 +33,7 @@ static const uint8_t SELECT_APDU_CMD[] = {
 };
 
 /*
- * CHALLENGE APDU (to request signature of the nonce from the Android device)
+ * CHALLENGE APDU header (to request signature of the nonce from the Android device)
  */
 static const uint8_t CHALLENGE_APDU_HEADER[] = {
 	0x80, /* CLA (Proprietary) */
@@ -122,6 +122,7 @@ int main(void)
 		}
 
 		LOG_INF("Received signature response");
+		LOG_DBG("Response length: %d bytes", resp_len);
 		LOG_HEXDUMP_DBG(response, resp_len, "Response:");
 
 		/* 4. VERIFY RESPONSE */
