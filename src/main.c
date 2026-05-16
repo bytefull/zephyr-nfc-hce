@@ -13,7 +13,7 @@ LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 #include "pn532.h"
 
-#define NONCE_SIZE 32
+#define NONCE_SIZE             32
 #define APDU_RESPONSE_MAX_SIZE 255
 
 static int verify_android_signature(const uint8_t *nonce, const uint8_t *signature, size_t sig_len);

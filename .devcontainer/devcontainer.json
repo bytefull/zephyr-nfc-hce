@@ -8,7 +8,8 @@
   ],
   "runArgs": [
     "--privileged",
-    "--device=/dev/bus/usb:/dev/bus/usb"
+    "--device=/dev/bus/usb:/dev/bus/usb",
+    "--cap-add=NET_ADMIN"
   ],
   "remoteUser": "user",
   "containerEnv": {
