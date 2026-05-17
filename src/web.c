@@ -21,7 +21,7 @@ static const uint8_t json_message[] = "{\"message\":\"HTTP server is running\"}"
 
 HTTP_SERVICE_DEFINE(my_service, "0.0.0.0", &http_service_port, 1, 10, NULL, NULL, NULL);
 
-static const struct http_resource_detail_static json_message_resource_detail = {
+static struct http_resource_detail_static json_message_resource_detail = {
     .common = {
         .type = HTTP_RESOURCE_TYPE_STATIC,
         .bitmask_of_supported_http_methods = BIT(HTTP_GET),
@@ -43,30 +43,9 @@ static void web_thread_entry(void *p1, void *p2, void *p3)
 	wait_for_network();
 	LOG_INF("Network is ready, starting HTTP server...");
 
-    int srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    struct sockaddr_in addr = {
-        .sin_family = AF_INET,
-        .sin_port = htons(8082),
-        .sin_addr.s_addr = htonl(INADDR_ANY),
-    };
-
-    bind(srv, (struct sockaddr *)&addr, sizeof(addr));
-    listen(srv, 1);
-
+	http_server_start();
 
 	while (1) {
-        int client = accept(srv, NULL, NULL);
-
-        const char response[] =
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 5\r\n"
-            "\r\n"
-            "Hello";
-
-        send(client, response, sizeof(response) - 1, 0);
-
-        close(client);
+		k_msleep(2000);
 	}
 }
