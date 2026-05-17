@@ -1,5 +1,5 @@
 {
-  "image": "ghcr.io/zephyrproject-rtos/zephyr-build:v0.28.0",
+  "image": "ghcr.io/zephyrproject-rtos/zephyr-build:main",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/application,type=bind",
   "workspaceFolder": "/workdir",
   "postCreateCommand": "west init -l application && west update && west zephyr-export && sudo /opt/python/venv/bin/pip install -r /workdir/dependencies/zephyr/scripts/requirements.txt",
