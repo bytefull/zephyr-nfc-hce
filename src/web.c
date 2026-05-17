@@ -43,9 +43,30 @@ static void web_thread_entry(void *p1, void *p2, void *p3)
 	wait_for_network();
 	LOG_INF("Network is ready, starting HTTP server...");
 
-	http_server_start();
+    int srv = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(8082),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+
+    bind(srv, (struct sockaddr *)&addr, sizeof(addr));
+    listen(srv, 1);
+
 
 	while (1) {
-		k_msleep(2000);
+        int client = accept(srv, NULL, NULL);
+
+        const char response[] =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 5\r\n"
+            "\r\n"
+            "Hello";
+
+        send(client, response, sizeof(response) - 1, 0);
+
+        close(client);
 	}
 }

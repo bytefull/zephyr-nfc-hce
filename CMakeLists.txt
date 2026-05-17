@@ -10,7 +10,8 @@ endif()
 
 target_sources(app PRIVATE
     src/main.c
-    src/web.c
+    # src/web.c
+    src/socket_server.c
 )
 
 zephyr_linker_sources(SECTIONS sections-rom.ld)
