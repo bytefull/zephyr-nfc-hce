@@ -22,77 +22,85 @@ HTTP_SERVICE_DEFINE(my_service, "0.0.0.0", &http_service_port, 1, 10, NULL, NULL
 
 /* *************************** index.html *************************** */
 static const uint8_t index_html_gz[] = {
-    #include "index.html.gz.inc"
+#include "index.html.gz.inc"
 };
 static struct http_resource_detail_static index_html_gz_resource_detail = {
-    .common = {
-        .type = HTTP_RESOURCE_TYPE_STATIC,
-        .bitmask_of_supported_http_methods = BIT(HTTP_GET),
-        .content_encoding = "gzip",
-		.content_type = "text/html",
-    },
-    .static_data = index_html_gz,
-    .static_data_len = sizeof(index_html_gz),
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_encoding = "gzip",
+			.content_type = "text/html",
+		},
+	.static_data = index_html_gz,
+	.static_data_len = sizeof(index_html_gz),
 };
 HTTP_RESOURCE_DEFINE(index_html_gz_resource, my_service, "/", &index_html_gz_resource_detail);
 
 /* *************************** bootstrap.min.css *************************** */
 static const uint8_t bootstrap_min_css_gz[] = {
-    #include "bootstrap.min.css.gz.inc"
+#include "bootstrap.min.css.gz.inc"
 };
 static struct http_resource_detail_static bootstrap_min_css_gz_resource_detail = {
-    .common = {
-        .type = HTTP_RESOURCE_TYPE_STATIC,
-        .bitmask_of_supported_http_methods = BIT(HTTP_GET),
-        .content_encoding = "gzip",
-		.content_type = "text/css",
-    },
-    .static_data = bootstrap_min_css_gz,
-    .static_data_len = sizeof(bootstrap_min_css_gz),
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_encoding = "gzip",
+			.content_type = "text/css",
+		},
+	.static_data = bootstrap_min_css_gz,
+	.static_data_len = sizeof(bootstrap_min_css_gz),
 };
-HTTP_RESOURCE_DEFINE(bootstrap_min_css_gz_resource, my_service, "/bootstrap.min.css", &bootstrap_min_css_gz_resource_detail);
+HTTP_RESOURCE_DEFINE(bootstrap_min_css_gz_resource, my_service, "/bootstrap.min.css",
+		     &bootstrap_min_css_gz_resource_detail);
 
 /* *************************** style.css *************************** */
 static const uint8_t style_css_gz[] = {
-    #include "style.css.gz.inc"
+#include "style.css.gz.inc"
 };
 static struct http_resource_detail_static style_css_gz_resource_detail = {
-    .common = {
-        .type = HTTP_RESOURCE_TYPE_STATIC,
-        .bitmask_of_supported_http_methods = BIT(HTTP_GET),
-        .content_encoding = "gzip",
-		.content_type = "text/css",
-    },
-    .static_data = style_css_gz,
-    .static_data_len = sizeof(style_css_gz),
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_encoding = "gzip",
+			.content_type = "text/css",
+		},
+	.static_data = style_css_gz,
+	.static_data_len = sizeof(style_css_gz),
 };
-HTTP_RESOURCE_DEFINE(style_css_gz_resource, my_service, "/style.css", &style_css_gz_resource_detail);
+HTTP_RESOURCE_DEFINE(style_css_gz_resource, my_service, "/style.css",
+		     &style_css_gz_resource_detail);
 
 /* *************************** script.js *************************** */
 static const uint8_t script_js_gz[] = {
-    #include "script.js.gz.inc"
+#include "script.js.gz.inc"
 };
 static struct http_resource_detail_static script_js_gz_resource_detail = {
-    .common = {
-        .type = HTTP_RESOURCE_TYPE_STATIC,
-        .bitmask_of_supported_http_methods = BIT(HTTP_GET),
-        .content_encoding = "gzip",
-		.content_type = "application/javascript",
-    },
-    .static_data = script_js_gz,
-    .static_data_len = sizeof(script_js_gz),
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_encoding = "gzip",
+			.content_type = "application/javascript",
+		},
+	.static_data = script_js_gz,
+	.static_data_len = sizeof(script_js_gz),
 };
-HTTP_RESOURCE_DEFINE(script_js_gz_resource, my_service, "/script.js", &script_js_gz_resource_detail);
+HTTP_RESOURCE_DEFINE(script_js_gz_resource, my_service, "/script.js",
+		     &script_js_gz_resource_detail);
 
 /* *************************** json data *************************** */
 static struct http_resource_detail_static json_message_resource_detail = {
-    .common = {
-        .type = HTTP_RESOURCE_TYPE_STATIC,
-        .bitmask_of_supported_http_methods = BIT(HTTP_GET),
-        .content_type = "application/json",
-    },
-    .static_data = json_message,
-    .static_data_len = sizeof(json_message) - 1,
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_type = "application/json",
+		},
+	.static_data = json_message,
+	.static_data_len = sizeof(json_message) - 1,
 };
 HTTP_RESOURCE_DEFINE(json_message_resource, my_service, "/data", &json_message_resource_detail);
 
