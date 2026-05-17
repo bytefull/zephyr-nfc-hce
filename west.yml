@@ -13,14 +13,16 @@ manifest:
   projects:
     - name: zephyr
       repo-path: zephyr
-      revision: v4.3.0
+      revision: v4.4.0
       path: zephyr
       import:
         path-prefix: dependencies
         name-allowlist:
           - cmsis_6
           - hal_stm32
+          - tf-psa-crypto
           - mbedtls
+          - picolibc
 
     - name: pn532
       remote: bytefull
