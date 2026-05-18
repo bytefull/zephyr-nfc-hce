@@ -7,10 +7,13 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 - [x] Make signature verification works
 - [x] Add keys generation instructions to readme
 - [ ] Export keys from their files without dumping them in code
-- [ ] Enable TF-M
-- [ ] Enable Networking on native_sim and on STM32 via USB CDC ECM
+- [ ] Enable TF-M on STM32 and don't break the build on native_sim
+- [x] Enable Networking on native_sim (using offloaded sockets)
+- [ ] Enable Networking on STM32 via USB CDC ECM
 - [ ] Design provisioning sequence
-- [ ] Add web server to serve bootstrap minimal UI via gzip compressed assets
+- [x] Add web server to serve bootstrap minimal UI via gzip compressed assets
+- [x] Make the project build configurable such us I can easily build web alone or auth alone
+
 
 ## Android app logs:
 

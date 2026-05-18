@@ -1,0 +1,23 @@
+menu "App Options"
+
+config APP_AUTH_ENABLED
+    bool "Enable auth application"
+    default y
+    help
+        Enable this to activate and include auth application in the build
+
+config APP_WEB_ENABLED
+    bool "Enable web application"
+    default y
+    help
+        Enable this to activate and include web application in the build
+
+config APP_SOCKET_SERVER_ENABLED
+    bool "Enable socket server application"
+    default y
+    help
+        Enable this to activate and include socket server application in the build
+
+endmenu # App Options
+
+source "Kconfig.zephyr"

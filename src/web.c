@@ -16,8 +16,8 @@ LOG_MODULE_REGISTER(web, LOG_LEVEL_DBG);
 static void web_thread_entry(void *p1, void *p2, void *p3);
 K_THREAD_DEFINE(web_thread, 4096, web_thread_entry, NULL, NULL, NULL, 8, 0, 0);
 
-static const uint16_t http_service_port = 8080;
-HTTP_SERVICE_DEFINE(my_service, "0.0.0.0", &http_service_port, 1, 10, NULL, NULL, NULL);
+static const uint16_t HTTP_SERVICE_PORT = 8080;
+HTTP_SERVICE_DEFINE(web_service, "0.0.0.0", &HTTP_SERVICE_PORT, 1, 10, NULL, NULL, NULL);
 
 static int buzzer_post_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			       const struct http_request_ctx *request_ctx,
@@ -38,7 +38,7 @@ static struct http_resource_detail_static index_html_gz_resource_detail = {
 	.static_data = index_html_gz,
 	.static_data_len = sizeof(index_html_gz),
 };
-HTTP_RESOURCE_DEFINE(index_html_gz_resource, my_service, "/", &index_html_gz_resource_detail);
+HTTP_RESOURCE_DEFINE(index_html_gz_resource, web_service, "/", &index_html_gz_resource_detail);
 
 /* *************************** bootstrap.min.css *************************** */
 static const uint8_t bootstrap_min_css_gz[] = {
@@ -55,7 +55,7 @@ static struct http_resource_detail_static bootstrap_min_css_gz_resource_detail =
 	.static_data = bootstrap_min_css_gz,
 	.static_data_len = sizeof(bootstrap_min_css_gz),
 };
-HTTP_RESOURCE_DEFINE(bootstrap_min_css_gz_resource, my_service, "/bootstrap.min.css",
+HTTP_RESOURCE_DEFINE(bootstrap_min_css_gz_resource, web_service, "/bootstrap.min.css",
 		     &bootstrap_min_css_gz_resource_detail);
 
 /* *************************** style.css *************************** */
@@ -73,7 +73,7 @@ static struct http_resource_detail_static style_css_gz_resource_detail = {
 	.static_data = style_css_gz,
 	.static_data_len = sizeof(style_css_gz),
 };
-HTTP_RESOURCE_DEFINE(style_css_gz_resource, my_service, "/style.css",
+HTTP_RESOURCE_DEFINE(style_css_gz_resource, web_service, "/style.css",
 		     &style_css_gz_resource_detail);
 
 /* *************************** script.js *************************** */
@@ -91,7 +91,7 @@ static struct http_resource_detail_static script_js_gz_resource_detail = {
 	.static_data = script_js_gz,
 	.static_data_len = sizeof(script_js_gz),
 };
-HTTP_RESOURCE_DEFINE(script_js_gz_resource, my_service, "/script.js",
+HTTP_RESOURCE_DEFINE(script_js_gz_resource, web_service, "/script.js",
 		     &script_js_gz_resource_detail);
 
 /* *************************** json data *************************** */
@@ -105,7 +105,7 @@ static struct http_resource_detail_static json_message_resource_detail = {
 	.static_data = "{\"message\":\"HTTP server is running\"}",
 	.static_data_len = sizeof("{\"message\":\"HTTP server is running\"}") - 1,
 };
-HTTP_RESOURCE_DEFINE(json_message_resource, my_service, "/data", &json_message_resource_detail);
+HTTP_RESOURCE_DEFINE(json_message_resource, web_service, "/data", &json_message_resource_detail);
 
 /* *************************** buzzer *************************** */
 static struct http_resource_detail_dynamic buzzer_resource_detail = {
@@ -118,7 +118,7 @@ static struct http_resource_detail_dynamic buzzer_resource_detail = {
 	.cb = buzzer_post_handler,
 	.user_data = NULL,
 };
-HTTP_RESOURCE_DEFINE(buzzer_resource, my_service, "/buzzer", &buzzer_resource_detail);
+HTTP_RESOURCE_DEFINE(buzzer_resource, web_service, "/buzzer", &buzzer_resource_detail);
 
 static int buzzer_post_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			       const struct http_request_ctx *request_ctx,
