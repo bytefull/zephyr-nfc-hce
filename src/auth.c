@@ -158,3 +158,35 @@ static void auth_thread_entry(void *p1, void *p2, void *p3)
 		k_msleep(2000);
 	}
 }
+
+static int verify_android_signature(const uint8_t *nonce, const uint8_t *signature, size_t sig_len)
+{
+	psa_status_t status;
+	mbedtls_svc_key_id_t key_id;
+	psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+
+	/* 1. Setup Key Attributes */
+	psa_set_key_type(&attributes, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+	psa_set_key_algorithm(&attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+	psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_MESSAGE);
+
+	/* 2. Import Public Key */
+	status = psa_import_key(&attributes, AUTHORIZED_PUBLIC_KEY, sizeof(AUTHORIZED_PUBLIC_KEY),
+				&key_id);
+	if (status != PSA_SUCCESS) {
+		LOG_ERR("Key import failed (%d)", status);
+		return -1;
+	}
+
+	/* 3. Verify Signature */
+	status = psa_verify_message(key_id, PSA_ALG_ECDSA(PSA_ALG_SHA_256), nonce, NONCE_SIZE,
+				    signature, sig_len);
+	if (status != PSA_SUCCESS) {
+		LOG_ERR("Signature verification failed (%d)", status);
+		/* Destroy the key before returning */
+	}
+
+	psa_destroy_key(key_id);
+
+	return (status == PSA_SUCCESS) ? 0 : -1;
+}
