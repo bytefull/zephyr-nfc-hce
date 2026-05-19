@@ -23,6 +23,20 @@ static int buzzer_post_handler(struct http_client_ctx *client, enum http_transac
 			       const struct http_request_ctx *request_ctx,
 			       struct http_response_ctx *response_ctx, void *user_data);
 
+/* *************************** favicon.ico *************************** */
+static const uint8_t favicon[] = {0};
+static struct http_resource_detail_static favicon_resource_detail = {
+	.common =
+		{
+			.type = HTTP_RESOURCE_TYPE_STATIC,
+			.bitmask_of_supported_http_methods = BIT(HTTP_GET),
+			.content_type = "image/x-icon",
+		},
+	.static_data = favicon,
+	.static_data_len = sizeof(favicon),
+};
+HTTP_RESOURCE_DEFINE(favicon_resource, web_service, "/favicon.ico", &favicon_resource_detail);
+
 /* *************************** index.html *************************** */
 static const uint8_t index_html_gz[] = {
 #include "index.html.gz.inc"
@@ -40,11 +54,11 @@ static struct http_resource_detail_static index_html_gz_resource_detail = {
 };
 HTTP_RESOURCE_DEFINE(index_html_gz_resource, web_service, "/", &index_html_gz_resource_detail);
 
-/* *************************** bootstrap.min.css *************************** */
-static const uint8_t bootstrap_min_css_gz[] = {
-#include "bootstrap.min.css.gz.inc"
+/* *************************** bootstrap.purged.min.css *************************** */
+static const uint8_t bootstrap_purged_min_css_gz[] = {
+#include "bootstrap.purged.min.css.gz.inc"
 };
-static struct http_resource_detail_static bootstrap_min_css_gz_resource_detail = {
+static struct http_resource_detail_static bootstrap_purged_min_css_gz_resource_detail = {
 	.common =
 		{
 			.type = HTTP_RESOURCE_TYPE_STATIC,
@@ -52,11 +66,11 @@ static struct http_resource_detail_static bootstrap_min_css_gz_resource_detail =
 			.content_encoding = "gzip",
 			.content_type = "text/css",
 		},
-	.static_data = bootstrap_min_css_gz,
-	.static_data_len = sizeof(bootstrap_min_css_gz),
+	.static_data = bootstrap_purged_min_css_gz,
+	.static_data_len = sizeof(bootstrap_purged_min_css_gz),
 };
-HTTP_RESOURCE_DEFINE(bootstrap_min_css_gz_resource, web_service, "/bootstrap.min.css",
-		     &bootstrap_min_css_gz_resource_detail);
+HTTP_RESOURCE_DEFINE(bootstrap_purged_min_css_gz_resource, web_service, "/bootstrap.purged.min.css",
+		     &bootstrap_purged_min_css_gz_resource_detail);
 
 /* *************************** style.css *************************** */
 static const uint8_t style_css_gz[] = {
@@ -178,10 +192,10 @@ static void web_thread_entry(void *p1, void *p2, void *p3)
 
 	/* Block thread to wait for getting an IP address from the network */
 	wait_for_network();
-
-	LOG_INF("Network is ready, starting HTTP server...");
+	LOG_INF("Network is ready");
 
 	http_server_start();
+	LOG_INF("Starting HTTP server...");
 
 	while (1) {
 		k_msleep(2000);

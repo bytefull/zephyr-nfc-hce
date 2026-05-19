@@ -1,18 +1,18 @@
 menu "App Options"
 
-config APP_AUTH_ENABLED
+config APP_AUTH
     bool "Enable auth application"
     default y
     help
         Enable this to activate and include auth application in the build
 
-config APP_WEB_ENABLED
+config APP_WEB
     bool "Enable web application"
     default y
     help
         Enable this to activate and include web application in the build
 
-config APP_SOCKET_SERVER_ENABLED
+config APP_SOCKET_SERVER
     bool "Enable socket server application"
     default y
     help

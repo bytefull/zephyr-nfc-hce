@@ -2,7 +2,13 @@
   "image": "ghcr.io/zephyrproject-rtos/zephyr-build:main",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/application,type=bind",
   "workspaceFolder": "/workdir",
-  "postCreateCommand": "west init -l application && west update && west zephyr-export && sudo /opt/python/venv/bin/pip install -r /workdir/dependencies/zephyr/scripts/requirements.txt",
+  "postCreateCommand": [
+    "west init -l application",
+    "west update",
+    "west zephyr-export",
+    "sudo /opt/python/venv/bin/pip install -r /workdir/dependencies/zephyr/scripts/requirements.txt",
+    "sudo npm install -g purgecss html-minifier-terser clean-css-cli terser"
+  ],
   "mounts": [
     "source=${localWorkspaceFolder}/.vscode/,target=/workdir/.vscode,type=bind,consistency=cached"
   ],
@@ -31,9 +37,9 @@
         "C_Cpp.default.compileCommands": "${workspaceFolder}/app/build/compile_commands.json",
         "cortex-debug.openocdPath.linux": "/opt/toolchains/zephyr-sdk-${containerEnv:ZSDK_VERSION}/sysroots/x86_64-pokysdk-linux/usr/bin/openocd",
         "files.associations": {
-          "*.overlay": "DeviceTree",
-          "*.dts": "DeviceTree",
-          "*.dtsi": "DeviceTree"
+          "*.overlay": "dts",
+          "*.dts": "dts",
+          "*.dtsi": "dts"
         }
       },
       "keybindings": [
