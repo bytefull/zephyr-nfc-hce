@@ -2,7 +2,7 @@
   "image": "ghcr.io/zephyrproject-rtos/zephyr-build:main",
   "workspaceMount": "source=${localWorkspaceFolder},target=/workdir/application,type=bind",
   "workspaceFolder": "/workdir",
-  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postCreateCommand": "application/.devcontainer/post-create.sh",
   "mounts": [
     "source=${localWorkspaceFolder}/.vscode/,target=/workdir/.vscode,type=bind,consistency=cached"
   ],
