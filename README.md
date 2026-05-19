@@ -11,11 +11,13 @@ This is a PoC (Proof of Concept) for establishing communication between an STM32
 - [x] Enable Networking on native_sim (using offloaded sockets)
 - [x] Install needed tools on the docker image
 - [x] Add PurgeCSS to the build pipeline
+- [x] Fix very slow page loading problem
 - [ ] Fix enabling apps in CMakeLists.txt
 - [ ] Export keys from their files without dumping them in code
 - [ ] Enable TF-M on STM32 and don't break the build on native_sim
 - [ ] Enable Networking on STM32 via USB CDC ECM
 - [ ] Design provisioning sequence
+- [ ] Bundle all web css and js into a single index.html file automatically
 
 ## Android app logs:
 

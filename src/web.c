@@ -17,7 +17,7 @@ static void web_thread_entry(void *p1, void *p2, void *p3);
 K_THREAD_DEFINE(web_thread, 4096, web_thread_entry, NULL, NULL, NULL, 8, 0, 0);
 
 static const uint16_t HTTP_SERVICE_PORT = 8080;
-HTTP_SERVICE_DEFINE(web_service, "0.0.0.0", &HTTP_SERVICE_PORT, 1, 10, NULL, NULL, NULL);
+HTTP_SERVICE_DEFINE(web_service, "0.0.0.0", &HTTP_SERVICE_PORT, 8, 10, NULL, NULL, NULL);
 
 static int buzzer_post_handler(struct http_client_ctx *client, enum http_transaction_status status,
 			       const struct http_request_ctx *request_ctx,
