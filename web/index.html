@@ -1,27 +1,72 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-bs-theme="auto">
 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="stylesheet" href="/bootstrap.min.css">
-  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/bootstrap.purged.min.css">
   <title>Dashboard</title>
+  <script>
+    (function () {
+      const dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      document.documentElement.setAttribute('data-bs-theme', dark ? 'dark' : 'light');
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', e => {
+        document.documentElement.setAttribute('data-bs-theme', e.matches ? 'dark' : 'light');
+      });
+    })();
+  </script>
 </head>
 
 <body>
-  <h1>Dashboard</h1>
-  <div class="container mt-4">
-    <div class="card shadow-sm">
-      <div class="card-body d-flex justify-content-between align-items-center">
-        <h5 class="card-title mb-0">Buzzer</h5>
+  <nav class="navbar border-bottom mb-4">
+    <div class="container">
+      <span class="navbar-brand fw-semibold">Access Control</span>
+    </div>
+  </nav>
 
-        <div class="form-check form-switch">
-          <input class="form-check-input" type="checkbox" id="buzzerSwitch">
+  <div class="container">
+    <h6 class="text-uppercase text-secondary fw-semibold small mb-3">Controls</h6>
+
+    <div class="card border-0 shadow-sm mb-3">
+      <div class="card-body d-flex justify-content-between align-items-center py-3">
+        <div class="d-flex align-items-center gap-3">
+
+          <!-- lightbulb-fill (LED on) -->
+          <svg id="iconOn" xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+            fill="currentColor" class="text-warning d-none" viewBox="0 0 16 16">
+            <path d="M2 6a6 6 0 1 1 10.174 4.31c-.203.196-.359.4-.453.619l-.762 1.769A.5.5 0
+              0 1 10.5 13h-5a.5.5 0 0 1-.46-.302l-.761-1.77a2 2 0 0
+              0-.453-.618A5.98 5.98 0 0 1 2 6m3 8.5a.5.5 0 0 1
+              .5-.5h5a.5.5 0 0 1 0 1l-.224.447a1 1 0 0 1-.894.553H6.618a1
+              1 0 0 1-.894-.553L5.5 15a.5.5 0 0 1-.5-.5"/>
+          </svg>
+
+          <!-- lightbulb (LED off) -->
+          <svg id="iconOff" xmlns="http://www.w3.org/2000/svg" width="28" height="28"
+            fill="currentColor" class="text-secondary" viewBox="0 0 16 16">
+            <path d="M2 6a6 6 0 1 1 10.174 4.31c-.203.196-.359.4-.453.619l-.762 1.769A.5.5 0
+              0 1 10.5 13a.5.5 0 0 1 0 1 .5.5 0 0 1 0 1l-.224.447a1 1 0 0
+              1-.894.553H6.618a1 1 0 0 1-.894-.553L5.5 15a.5.5 0 0 1-1
+              0 .5.5 0 0 1 0-1 .5.5 0 0 1 0-1 .5.5 0 0
+              1-.46-.302l-.761-1.77a2 2 0 0 0-.453-.618A5.98 5.98 0 0 1 2
+              6m6-5a5 5 0 0 0-3.479 8.592c.263.254.514.564.676.941L5.83
+              12h4.342l.632-1.467c.162-.377.413-.687.676-.941A5 5 0 0 0 8 1"/>
+          </svg>
+
+          <div>
+            <div class="fw-semibold">LED</div>
+            <div class="text-secondary small" id="ledStatus">Off</div>
+          </div>
+        </div>
+
+        <div class="form-check form-switch mb-0">
+          <input class="form-check-input" type="checkbox" role="switch"
+            id="ledSwitch" style="width:2.5em;height:1.25em">
         </div>
       </div>
     </div>
   </div>
+
   <script src="/script.js"></script>
 </body>
 
